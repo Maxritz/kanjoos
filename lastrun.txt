@@ -1,0 +1,142 @@
+=== C2 Device Abstraction Layer Unit Tests ===
+
+
+=== Test 1: knj_check_arch() arch guard ===
+  TEST matching arch returns ok                                     PASS
+ PASS
+  TEST unset env_arch returns refusal                               PASS
+ PASS
+  TEST empty env_arch returns refusal                               PASS
+ PASS
+  TEST mismatched arch returns refusal                              PASS
+ PASS
+  TEST nullptr built_arch returns refusal                           PASS
+
+=== Test 2: knj_build_arch_env() ===
+  TEST unset KNJ_BUILD_ARCH returns nullptr                         PASS
+  TEST set KNJ_BUILD_ARCH returns the value                         PASS
+
+=== Test 3: knj_cap_available() ===
+  TEST gfx1201 has WmmaF16                                          PASS
+  TEST gfx1031 does not have WmmaF16                                PASS
+  TEST gfx1201 has Fp8                                              PASS
+  TEST gfx1031 does not have Fp8                                    PASS
+  TEST gfx1201 has Dot4I32I8                                        PASS
+  TEST gfx1031 has Dot4I32I8                                        PASS
+  TEST gfx1201 has Dot8I32I4                                        PASS
+  TEST gfx1031 has Dot8I32I4                                        PASS
+  TEST gfx1201 has PkFmaF16                                         PASS
+  TEST gfx1031 has PkFmaF16                                         PASS
+  TEST gfx1031 has Sdot4Builtin                                     PASS
+  TEST gfx1201 does not have Sdot4Builtin                           PASS
+  TEST nullptr arch returns false                                   PASS
+  TEST empty arch returns false                                     PASS
+
+=== Test 4: knj_cap_label() ===
+  TEST Dot4I32I8 label                                              PASS
+  TEST Dot8I32I4 label                                              PASS
+  TEST PkFmaF16 label                                               PASS
+  TEST WmmaF16 label                                                PASS
+  TEST Fp8 label                                                    PASS
+  TEST Sdot4Builtin label                                           PASS
+
+=== Test 5: knj_dot_label() ===
+  TEST has_dot_builtin returns builtin(sdot4)                       PASS
+  TEST no dot builtin but has DOT_ASM returns asm label             PASS
+  TEST no dot at all returns none (or skips if DOT_ASM enabled)     (KNJ_HAS_DOT_ASM=1, skipping 'none' test)
+ PASS
+
+=== Test 6: knj_print_cap_line() ===
+  TEST gfx1201 capability line                                         [capabilities  wmma=on  fp8=on  dot=asm(v_dot4_i32_i8)  smi=lane-split  v_pk_fma_f16=yes]
+ PASS
+ PASS
+ PASS
+ PASS
+ PASS
+  TEST gfx1031 capability line                                         [capabilities  wmma=off  fp8=off  dot=builtin(sdot4)  smi=lane-split  v_pk_fma_f16=yes]
+ PASS
+ PASS
+ PASS
+ PASS
+
+=== Test 7: knj_probe_host_caps() ===
+  TEST probe returns correct caps for compiled arch                 PASS
+ PASS
+ PASS
+ PASS
+ PASS
+ PASS
+  TEST probe with unset KNJ_BUILD_ARCH returns arch_ok=false        PASS
+ PASS
+  TEST probe with mismatched KNJ_BUILD_ARCH returns arch_ok=false   PASS
+ PASS
+  TEST device-only fields are zeroed                                PASS
+ PASS
+ PASS
+ PASS
+ PASS
+ PASS
+ PASS
+
+=== Test 8: Backend::create() ===
+  TEST create() succeeds when KNJ_BUILD_ARCH matches                PASS
+ PASS
+ PASS
+  TEST create() returns nullptr when KNJ_BUILD_ARCH is unset        PASS
+ PASS
+    refusal: [KNJ_BUILD_ARCH is not set: a backend that cannot prove which arch it was built for must not touch the device]
+  TEST create() returns nullptr when KNJ_BUILD_ARCH mismatches      PASS
+ PASS
+    refusal: [arch mismatch: KNJ_BUILD_ARCH disagrees with the compiled backend arch (built for a different target than the device it is runn]
+
+=== Test 9: Backend::from_caps() ===
+  TEST from_caps() creates backend from injected caps               PASS
+ PASS
+ PASS
+ PASS
+
+=== Test 10: Backend::would_instantiate() ===
+  TEST gfx1201 backend would instantiate WMMA                       PASS
+  TEST gfx1201 backend without WMMA would not instantiate WMMA      PASS
+  TEST gfx1031 backend would not instantiate WMMA                   PASS
+  TEST gfx1031 backend would instantiate dot                        PASS
+  TEST gfx1201 backend would instantiate dot                        PASS
+
+=== Test 11: Backend launch methods ===
+  TEST launch_expert_gemm_wmma returns true when has_wmma           PASS
+  TEST launch_expert_gemm_wmma returns false when !has_wmma         PASS
+  TEST launch_expert_gemm_simt returns true when arch_ok            PASS
+  TEST launch_attention returns true when arch_ok                   PASS
+  TEST launch_kv_write is a no-op                                   PASS
+
+=== Test 12: knj_print_doctor_header() ===
+  TEST doctor header with device info                                  [device        AMD Radeon RX 9070 XT  gfx1201  64 CU  wave32
+capabilities  wmma=on  fp8=on  dot=asm(v_dot4_i32_i8)  smi=lane-split  v_pk_fma_f16=yes
+rebar         full aperture
+]
+ PASS
+ PASS
+ PASS
+ PASS
+ PASS
+ PASS
+ PASS
+  TEST doctor header without device info                               [device        (no device)  gfx1201  0 CU  wave0
+capabilities  wmma=on  fp8=on  dot=asm(v_dot4_i32_i8)  smi=lane-split  v_pk_fma_f16=yes
+rebar         no full aperture
+]
+ PASS
+  TEST doctor header with arch guard refused                           [device        (no device)  (arch guard refused)  0 CU  wave0
+capabilities  wmma=off  fp8=off  dot=asm(v_dot4_i32_i8)  smi=lane-split  v_pk_fma_f16=yes
+rebar         no full aperture
+]
+ PASS
+ PASS
+
+=== Summary ===
+  tests run: 53
+  tests passed: 91
+  tests failed: 0
+
+RESULT: PASS
+exitcode=0

@@ -1,0 +1,112 @@
+# Kanjoos gfx1201 device prefill -- raw evidence, 2026-10-07
+# ============================================================================
+# Request being answered: "Get Qwen3-MoE prefill running on gfx1201 with
+# rocWMMA and measure pp512 on the 9070 XT, so the 12.8 t/s host figure has a
+# device counterpart."
+#
+# SCOPE OF THIS RECORD, STATED BEFORE THE NUMBERS:
+#   This is the layer-0 MoE FFN *only*. It is not the model. It is not pp512 for
+#   the model. The whole-model prefill figure at the bottom is labelled DERIVED
+#   and rests on two ASSUMPTIONs (28 identical layers, attention = 1.333x the
+#   FFN). Do not quote it as a measurement.
+#
+# host      : Windows 11, 32 threads
+# device    : AMD Radeon RX 9070 XT, gfx1201, RDNA4, wave32, 15.92 GiB, 8 MiB L2
+# model     : Qwen3-MOE-4x0.6B-2.4B-Q4_K_M.gguf  (964,653,184 B, qwen3moe)
+# job       : build/q4k/layer00.job   (layer 0 only: gate/up Q4_K, down Q6_K, real router)
+# oracle    : build/q4k/dump/{gate,up,down}.f32 -- produced by gguf-py dequantize,
+#             itself proven byte-exact by tools/q4k_unpack_crosscheck.py
+#             (AGREE, 37,748,736 weights, 0 bit differences, max_ulp 0)
+#
+# Build line (the one that works; --rocm-path MUST end /lib/llvm, -std=c++17 is a
+# rocWMMA header requirement, not a preference):
+#   hipcc --rocm-path="G:/ROCM10RT-gfx1201/lib/llvm" -std=c++17 -O2 \
+#     --offload-arch=gfx1201 \
+#     -Xclang -target-feature -Xclang +wavefrontsize32 \
+#     -I tools/bench -I kernels tools/bench/q4k_moe_ffn.hip -o build/q4k/q4k_moe_ffn.exe
+#
+# Run line (arch-guarded: the driver exits 7 if KNJ_BUILD_ARCH is unset, 6 if it
+# disagrees with hipGetDeviceProperties().gcnArchName -- an arch-mismatched
+# binary runs and lies, so it must refuse):
+#   KNJ_BUILD_ARCH=gfx1201 HIP_VISIBLE_DEVICES=0 \
+#     ./build/q4k/q4k_moe_ffn.exe build/q4k/layer00.job build/q4k/dump 512
+
+== build ==
+binary  : build/q4k/q4k_moe_ffn.exe
+bytes   : 287744
+warnings: MSVC 14.51 _CRT_SECURE_NO_WARNINGS deprecation (fopen/sscanf) and
+          '+wavefrontsize32' is not a recognized feature for this target
+          (ignoring feature) -- both expected, both inert (AGENTS.md rule 4)
+BUILD_RC=0
+
+== run, 512 tokens, top-2 of 4 experts ==
+device      AMD Radeon RX 9070 XT (gfx1201)
+cu          32   wave 32   threads/block 64
+layer       0   hidden=1024 ff=3072 experts=4 topk=2
+tokens      512   pairs=1024
+weights     gate 7077888 B q4_k, up 7077888 B q4_k, down 10321920 B q6_k
+routing     e0=254 e1=256 e2=253 e3=261  (uneven by construction, real router weights)
+
+computing host oracle (double, f16-mirrored)...
+
+-- full-output check vs verified gguf-py decode --
+  gate (Q4_K, fmirror)   rows=1024   worst-row-rel=2.032e-06  worst-abs=1.462e-05  unwritten=0  rows-over-tol=0
+  up   (Q4_K, fmirror)   rows=1024   worst-row-rel=2.200e-06  worst-abs=8.328e-06  unwritten=0  rows-over-tol=0
+  (f16 declared reduction, all-fp32 oracle)
+  gate (Q4_K, fp32)      rows=1024   worst-row-rel=3.431e-04  worst-abs=2.147e-03  unwritten=0  rows-over-tol=0
+  up   (Q4_K, fp32)      rows=1024   worst-row-rel=3.203e-04  worst-abs=1.125e-03  unwritten=0  rows-over-tol=0
+
+-- down projection (Q6_K) --
+  down (Q6_K, fmirror)   rows=1024   worst-row-rel=1.062e-05  worst-abs=8.169e-05  unwritten=0  rows-over-tol=0
+
+-- layer output (weighted top-k sum) --
+  layer0 MoE FFN out     rows=512    worst-row-rel=5.774e-08  worst-abs=4.165e-07  unwritten=0  rows-over-tol=0
+
+-- SIMT fallback (always compiled, per-element decoders) --
+  gate (SIMT)            rows=1024   worst-row-rel=2.410e-06  worst-abs=1.317e-05  unwritten=0  rows-over-tol=0
+  up   (SIMT)            rows=1024   worst-row-rel=1.825e-06  worst-abs=6.944e-06  unwritten=0  rows-over-tol=0
+  down (SIMT)            rows=1024   worst-row-rel=3.960e-06  worst-abs=2.941e-05  unwritten=0  rows-over-tol=0
+  SIMT gate+up             222.62 ms
+  SIMT down                125.96 ms
+
+-- timing (MEASURED, launch-inclusive, best of 5 x 20) --
+  gate+up (Q4_K)        3.3432 ms      3.85 TFLOP/s  grid=(192,17,4)
+  down    (Q6_K)        2.3319 ms      2.76 TFLOP/s  grid=(64,17,4)
+  layer0 MoE FFN        5.7640 ms      3.35 TFLOP/s  (both kernels)
+  FLOPs               19.327 GFLOP for 512 tokens (1024 pairs, top-2)
+  packed weight bytes 23.34 MiB read per pass (7077888 + 7077888 + 10321920)
+
+-- DERIVED model pp512 (NOT MEASURED) --
+  layer0 MoE FFN x28 layers x1.333 (attention, ASSUMPTION) = 215.2 ms
+  => 2379 tok/s prefill for the whole model, IF every layer costs what layer 0 does
+  host engine, whole model, MEASURED : 12.8 tok/s (5 tok / ~391 ms)
+  llama.cpp ROCm -ngl 99, MEASURED   : 13817.56 tok/s pp512
+
+RESULT: PASS (0 checks failed, 0 unwritten outputs)
+RUN_RC=0
+
+== what this PASS does and does not prove ==
+PROVES
+  - gfx1201 executes the Q4_K and Q6_K expert GEMMs through rocWMMA at
+    16x16x16/wave32 and produces the right numbers: every element of every one
+    of the 1024 gate, 1024 up, 1024 down and 512 layer-output rows was compared,
+    not a stride. unwritten=0 and rows-over-tol=0 on all of them.
+  - The 3.85 / 2.76 TFLOP/s figures are the measured cost of shipping real
+    Q4_K/Q6_K decoders through the WMMA pipeline on this part.
+
+DOES NOT PROVE
+  - That the model prefills. Attention is not on device, the 28-layer stack is
+    not on device, and no token has been generated on device. The 2379 tok/s
+    figure is DERIVED from one layer and two assumptions; it is not a result.
+  - That the SIMT fallback is a speed path. 222.62 + 125.96 ms per pass is ~60x
+    slower than the WMMA path -- it is the C19 escape hatch, not a competitor.
+
+== open question this run RAISES ==
+  3.35 TFLOP/s is 6.9% of the 48.7 TFLOP/s RDNA4 dense-FP16 class peak, well
+  below the previously MEASURED 19.12 TFLOP/s (39%) microbenchmark. Candidate
+  explanations, none yet tested: (a) grid.y=17 with 64-thread blocks underfills
+  the 32 CUs; (b) the kernel is weight-path bound, not MAC bound -- it decodes
+  Q4_K as it consumes it, and the per-element decode in the WMMA path costs what
+  the SIMT path costs, so the MACs are not the bottleneck at all; (c) 4 experts
+  means the M dimension is thin (512 tokens / 4 experts = 128 rows per expert).
+  This is recorded as an open question, NOT explained away.

@@ -1,0 +1,45 @@
+# Kanjoos bench baselines - pinned numbers from a REFERENCE run.
+#
+# Reference machine: AMD Radeon RX 9070 XT, gfx1201, 32 CU @ 2400 MHz,
+# Windows 11 (ROCm 10 runtime tree G:/ROCM10RT-gfx1201), 2026-10-06.
+# These are THIS machine's numbers; a different GPU must re-pin, not tune.
+#
+# IMPORTANT -- what these are NOT:
+#   - They are NOT config-derived. All three are KERNEL TIMINGS on the gfx1201
+#     device (gemm_tiled BEST_PCT, attn_c16 PREFILL_US/DECODE_US). None of them
+#     depends on the model config.json geometry, so they cannot drift when the
+#     config changes and are not pinned to any doc-reference or verified config.
+#   - They are gfx1201-ONLY. A gfx1031 run is never judged by these (the runner
+#     is arch-scoped: e_arch must match). gfx1031 throughput is not measurable
+#     on this machine (no gfx1031 device attached); its tier-C drivers DECLINE.
+#
+# The model-config-dependent doc claims are audited separately and exclusively by
+#   python tools/kvroof/kv_roofline.py <config> --check   (71 claims, exit 5 on mismatch)
+#   python tools/check_docs.py                            (24 claims, exit non-0 on mismatch)
+# Both of those read the verified config.json (models/qwen3-30b-a3b/config.json,
+# fetched from HF Qwen/Qwen3-30B-A3B, sha256 2850ddb3... matching docs/00 §8.10).
+#
+# Format (whitespace-separated, one entry per line):
+#   arch  driver-basename  metric  dir  value  sed-expression
+#   dir = min  : higher is better  -> REGRESSION below value * 0.90
+#   dir = max  : lower  is better  -> REGRESSION above value * 1.10
+# The sed expression must capture the measured number as \1, carry its
+# own trailing p flag (the runner calls sed -nE), and contain NO literal
+# spaces (use [[:space:]]+) so it stays one field.
+#
+# Compared only when the driver built, ran, and passed its own oracle
+# (exit 0) on the SAME arch. A missing/renamed metric line also fails:
+# a pinned number that cannot be read is not a pass.
+#
+# Re-pin only with a reason stated in the commit: these exist to make a
+# slowdown visible, so loosening them silently defeats them.
+#
+# Metric history (same machine, best-of-3 driver protocol):
+#   gemm_tiled BEST_PCT  18.0% (per-k pk flush) -> 21.4% (per-tile flush,
+#               TK=32; A/B: TK16=21.0, TK32=21.8, TK64=21.7)
+#   attn_c16 PREFILL_US  40542 (KT64, LDS reduce) -> 9624 (butterfly reduce,
+#               no in-loop barriers, KT=16 residency sweep 64/32/16/8)
+#   attn_c16 DECODE_US   292.4 -> 195 (shuffle reduce + KTD=32)
+gfx1201  gemm_tiled  BEST_PCT    min  21.4  s/.*BEST:[[:space:]]+M=1024[[:space:]]+at[[:space:]]+([0-9.]+)%.*/\1/p
+gfx1201  attn_c16    PREFILL_US  max  9650  s/.*prefill[[:space:]]+2048x8[[:space:]]+GQA4[[:space:]]+([0-9.]+).*/\1/p
+gfx1201  attn_c16    DECODE_US   max  200   s/.*decode[[:space:]]+step[[:space:]]+x8x8[[:space:]]+([0-9.]+).*/\1/p

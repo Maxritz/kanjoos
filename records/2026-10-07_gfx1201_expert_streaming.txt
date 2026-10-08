@@ -1,0 +1,108 @@
+# Kanjoos gfx1201 expert streaming -- raw evidence, 2026-10-07
+# ============================================================================
+# Request being answered: "expert residency + prefetch so a MoE larger than
+# VRAM streams experts from NVMe, proven bit-for-bit against the fully-resident
+# path."
+#
+# SCOPE OF THIS RECORD, STATED BEFORE THE NUMBERS:
+#   This is ONE LAYER (layer 0) of one model. It is not the model end to end.
+#   What it proves: the real C9 residency manager driving a real C8 slot pool
+#   and a real C11 transfer engine produces byte-identical expert projections
+#   to the fully-resident path, with no expert lost and no staging buffer
+#   leaked. What it does NOT prove: coherence, prefill/token-generation speed,
+#   prefetch hit rate against a lookahead stream, or anything about a model
+#   larger than VRAM at scale. Those are named in the Still-open list of
+#   docs/CODING-LOG.PENDING.md Phase 33.
+#
+# host      : Windows 11, 32 threads
+# device    : AMD Radeon RX 9070 XT, gfx1201, RDNA4, wave32, 15.92 GiB, 8 MiB L2
+# model     : Qwen3-MOE-4x0.6B-2.4B-Q4_K_M.gguf  (964,653,184 B, qwen3moe)
+# job       : build/q4k/layer00.job   (layer 0: gate/up Q4_K, down Q6_K, real router)
+# oracle    : build/q4k/dump/{gate,up,down}.f32 -- gguf-py dequantize, itself
+#             proven byte-exact by tools/q4k_unpack_crosscheck.py
+#             (AGREE, 37,748,736 weights, 0 bit differences, max_ulp 0)
+# arch guard: KNJ_BUILD_ARCH=gfx1201 required; unset -> exit 7, mismatch -> exit 6
+#
+# Build line (the one that works; --rocm-path MUST end /lib/llvm, -std=c++17 is a
+# rocWMMA header requirement, not a preference):
+#   hipcc --rocm-path="G:/ROCM10RT-gfx1201/lib/llvm" -std=c++17 -O2 \
+#     --offload-arch=gfx1201 \
+#     -Xclang -target-feature -Xclang +wavefrontsize32 \
+#     -I tools/bench -I kernels -I . \
+#     tools/bench/q4k_stream_ffn.hip src/residency/residency.cpp \
+#     -o build/q4k/q4k_stream_ffn.exe
+#
+# Run line:
+#   KNJ_BUILD_ARCH=gfx1201 HIP_VISIBLE_DEVICES=0 \
+#     ./build/q4k/q4k_stream_ffn.exe build/q4k/layer00.job build/q4k/dump 512 2
+#
+# Three consecutive runs, all RUN_RC=0, all identical in every correctness and
+# transport field. Wall time varies with host/NVMe noise (stated, not averaged
+# away).
+# ============================================================================
+
+=== run 1  RUN_RC=0 ===
+device      AMD Radeon RX 9070 XT (gfx1201)
+cu          32   wave 32   threads/block 64
+layer       0   hidden=1024 ff=3072 experts=4 topk=2
+tokens      512   pairs=1024
+slab bytes  gate=1769472 up=1769472 down=2580480 (per expert)
+routing     e0=254 e1=256 e2=253 e3=261 
+
+--- PART 1: resident (whole bank on device) ---
+
+--- PART 2: streamed (C9 residency, 2 slot(s) of 2.46 MiB) ---
+slot pool   2 x 2.461 MiB = 4.922 MiB   (bank would be 23.344 MiB)
+
+--- PART 3: bit-for-bit streamed vs resident (I1) ---
+  gate (Q4_K)              bytes-identical=yes  differing-elements=0
+  up   (Q4_K)              bytes-identical=yes  differing-elements=0
+  down (Q6_K)              bytes-identical=yes  differing-elements=0
+
+--- streamed down vs verified gguf-py decode (Q6_K) ---
+  down (streamed, Q6_K)    rows=1024   worst-row-rel=1.062e-05  worst-abs=8.169e-05  unwritten=0  rows-over-tol=0
+
+--- streamed layer output (weighted top-k sum) ---
+  layer0 MoE FFN out       rows=512    worst-row-rel=5.774e-08  worst-abs=4.165e-07  unwritten=0  rows-over-tol=0
+
+--- transport ---
+  NVMe reads submitted     12  (completed 12, 24477696 bytes)
+  H2D copies               12  (24477696 bytes)
+  NVMe write attempts      0 issued, 0 refused (reads beat writes)
+  weight bytes from file   24477696 B = 23.344 MiB per pass
+  C8 slot acquires         12  (refusals 0, of which new 0)
+  C8 event-gated evictions 12  (retire waited on the use event)
+  C8 use events recorded   12
+  C9 transitions           84  (C21 events 84, into VRAM 12)
+  C9 deadline misses       0  (C21 miss records 0) -- VACUOUS HERE:
+                           demand_deadline_ticks=1000000, so no miss is reachable;
+                           the deadline path is NOT exercised by this run.
+  C19 fallback hand-offs   0
+  staging live after run   0 buffers / 0 bytes (allocs 12 frees 12)
+  C8 slot releases         12  (acquires 12 -- must match)
+  slot pool occupancy peak 1 / 2 slots (50%, high-water during the run)
+  C8 own event-gate hits   yes  (allocator saw an unfired use event)
+  causes: nvme_read_done=12 event_fired=12 evict_done=24
+
+--- timing (MEASURED, includes NVMe read + H2D + compute) ---
+  streamed layer-0 FFN      165.479 ms  (pool 2 x 2.461 MiB)
+  FLOPs                    19.327 GFLOP for 512 tokens (1024 pairs, top-2)
+  effective                   0.12 TFLOP/s  (compute+transport bound)
+  achieved transfer          23.34 MiB / 165.479 ms = 0.15 GiB/s (read+H2D)
+  VRAM footprint           4.922 MiB vs 23.344 MiB resident (21.1%)
+
+=== Summary ===
+  streamed == resident (bit-for-bit): yes
+  checks failed: 0
+
+RESULT: PASS
+
+=== run 2  RUN_RC=0 ===
+  streamed layer-0 FFN      150.781 ms   achieved transfer 0.16 GiB/s
+  (every other field byte-identical to run 1)
+
+=== run 3  RUN_RC=0 ===
+  streamed layer-0 FFN      181.873 ms   achieved transfer 0.13 GiB/s
+  (every other field byte-identical to run 1)
+
+=== end of record ===

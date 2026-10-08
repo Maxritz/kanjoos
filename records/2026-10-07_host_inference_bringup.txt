@@ -1,0 +1,83 @@
+# Kanjoos host inference bring-up -- raw evidence, 2026-10-07
+# host: AMD RX 9070 XT (gfx1201) present but unused here; this is the CPU reference path.
+# model: /c/Users/rr/OneDrive/Desktop/kraken/models/Qwen3-MOE-4x0.6B-2.4B-Q4_K_M.gguf
+
+== tools/build_engine.sh (release) ==
+   45 | #define NOMINMAX 1
+      | 
+binary  : build/host/kanjoos-run
+bytes   : 321312
+RC=0
+
+== generation, greedy, 16 tokens, --threads 24 ==
+geometry   : layers=28 hidden=1024 heads=16/8 head_dim=128 q_dim=2048 kv_dim=1024
+  experts=4 top_k=2 expert_ff=3072 vocab=151936 ctx_train=40960
+  rms_eps=1e-06 rope_base=1e+06 rope=split-halves (ggml NEOX)
+tokenizer  : vocab 151936, bos 151643, eos 151645, add_bos 0
+prompt     : 5 tokens, round-trip "The capital of France is"
+
+prompt     : The capital of France is
+completion :  Paris. The capital of Italy is Rome. The capital of Spain is Madrid.
+
+-- measured --
+prefill    : 5 tokens in   376.42 ms       13.28 tok/s
+decode     : 16 tokens in  1506.20 ms       10.62 tok/s  (94.137 ms/token)
+RC=0
+
+== reference (llama.cpp, CPU only, same prompt) ==
+prompt 0.34 t/s; eval 156.28 ms/token = 6.40 t/s; text identical to the completion above
+
+== throughput, 64 prefill + 32 decode forwards, repeated ==
+-- threads 16 --
+pp64      6106.66 ms       10.48 tok/s
+tg32      2981.13 ms       10.73 tok/s  (93.160 ms/token)
+-- threads 24 --
+pp64      6307.02 ms       10.15 tok/s
+tg32      3195.60 ms       10.01 tok/s  (99.862 ms/token)
+-- threads 32 --
+pp64      7486.24 ms        8.55 tok/s
+tg32      3907.62 ms        8.19 tok/s  (122.113 ms/token)
+
+== fused dot vs gguf-py + numpy (tools/fused_dot_probe + tools/fused_dot_crosscheck.py) ==
+blk.0.attn_q.weight          type=Q4_K   n_in=1024 rows=2048 nvec=3 stride=576
+blk.0.attn_v.weight          type=Q6_K   n_in=1024 rows=1024 nvec=3 stride=840
+blk.0.ffn_gate_exps.weight   type=Q4_K   n_in=1024 rows=12288 nvec=3 stride=576
+blk.0.ffn_down_exps.weight   type=Q6_K   n_in=3072 rows=4096 nvec=3 stride=2520
+blk.1.attn_k.weight          type=Q4_K   n_in=1024 rows=1024 nvec=3 stride=576
+probe RC=0
+tensor                         n_in    rows nvec     max_abs     max_rel  verdict
+blk.0.attn_q.weight            1024    2048    3  3.2187e-06   4.114e-04  OK
+blk.0.attn_v.weight            1024    1024    3  2.7418e-06   3.227e-05  OK
+blk.0.ffn_gate_exps.weight     1024   12288    3  4.5300e-06   3.914e-04  OK
+blk.0.ffn_down_exps.weight     3072    4096    3  1.1086e-05   3.960e-04  OK
+blk.1.attn_k.weight            1024    1024    3  2.6226e-06   9.659e-05  OK
+
+AGREE
+crosscheck RC=0
+
+== engine intermediates vs the independent numpy oracle (tools/hidden_diff.py) ==
+# engine dumps regenerated with the hoisted-allocation binary:
+$ KNJ_DUMP_HIDDEN=build/eng2 ./build/host/kanjoos-run --model <model> --ctx 512 -p "The capital of France is" -n 0 --threads 24
+                             1649 element(s) beyond per-element tol, all within tensor scale
+
+argmax: ref=12095 (logit +16.3321)  eng=12095 (logit +16.3321)  AGREE
+top-10 overlap: 10/10
+
+AGREE: every dumped tensor matches the independent oracle within tolerance
+hidden_diff RC=0
+
+== dequant_row_f32 vs gguf-py (pre-existing check, bit-exact) ==
+blk.0.attn_q.weight          type=Q4_K   dims=1024x2048  rows=2048 n_in=1024 stride=576 bytes=8388608
+blk.0.attn_v.weight          type=Q6_K   dims=1024x1024  rows=1024 n_in=1024 stride=840 bytes=4194304
+blk.0.ffn_down_exps.weight   type=Q6_K   dims=3072x1024x4  rows=4096 n_in=3072 stride=2520 bytes=50331648
+blk.0.attn_q.weight          n=  2097152 exact=  2097152/2097152   maxabs=0.000000e+00 maxrel=0.000e+00 worst_idx=0 engine=0.001854 ref=0.001854
+blk.0.attn_v.weight          n=  1048576 exact=  1048576/1048576   maxabs=0.000000e+00 maxrel=0.000e+00 worst_idx=0 engine=0.011616 ref=0.011616
+blk.0.ffn_down_exps.weight   n= 12582912 exact= 12582912/12582912  maxabs=0.000000e+00 maxrel=0.000e+00 worst_idx=0 engine=0.021935 ref=0.021935
+
+AGREE
+dequant_crosscheck RC=0
+
+== repo documentation gate ==
+
+check_docs: all 24 documented figures match the tools.
+check_docs RC=0

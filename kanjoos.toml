@@ -1,0 +1,63 @@
+# Kanjoos default configuration.
+#
+# Every value here is a STARTING POINT, not a decision. The autotuner (C3)
+# rewrites block size, slab depth, prefetch depth and transfer extent from
+# measured bandwidth and hit rate, and the budget manager (C22) overrides the
+# VRAM/RAM classes from what it detects. Overriding anything here visibly
+# changes the run; `kanjoos doctor` prints which values were measured and which
+# were taken from this file.
+
+[model]
+# 0 = autodetect from the file. Set explicitly only to pin a profile.
+vram_class = 0        # 0 | 6 | 8 | 12 | 16   (GiB)
+ram_class = 0         # 0 | 16 | 24 | 32 | 48 | 64 | 96
+
+[gpu]
+# 0 = measured at startup by allocating the runtime's own buffer sizes and
+# taking the high-water mark. Never hard-code this: it is the one number that
+# decides whether every other budget is real.
+vram_ceiling_gib = 0
+token_block = 32      # 16 on the 6 GiB class
+layer_slab = 4        # 2 on the 6 GiB class
+prefetch_mib = 8      # initial NVMe prefetch extent
+require_rebar = true  # refuse to start on a 256 MiB aperture
+
+# Split of what remains after the model and workspace. The most consequential
+# policy in the engine; see docs/04-memory-tiering.md section 2.
+kv_expert_split = 0.50
+
+[ram]
+warm_fraction = 0.65
+min_free_gib = 8
+pinned_pool_gib = 3   # 2 at 16/24/32, 3 at 48/64, 6 at 96
+
+[nvme]
+cache_fraction = 0.35
+max_cache_tib = 2
+# Persist shared prefixes and suspended sessions only. Writing transient KV is
+# not permitted by the admission policy (C12); this is a backstop, not a policy.
+persist_policy = "prefixes_and_suspended"
+
+[profile]
+# off | counters | full | table
+profiling = "off"
+profile_dir = "runs"
+profile_floor = 256       # empty ops for the instrumentation floor
+profile_warmup = 8        # steps discarded before accumulating
+subtract_floor = true
+
+[spec]
+# MTP costs zero load-time I/O because the head is already resident. The drafter
+# families cost a second file and must earn their place on measurement.
+enable_mtp = true
+enable_dflash = false
+drafter_path = ""
+min_draft_accept = 0.60   # below this the draft width is reduced
+confidence_early_stop = true
+
+[server]
+host = "127.0.0.1"
+port = 8080
+# Prefix homogeneity beats batch size for KV locality.
+batch_policy = "prefix_homogeneous"
+max_batch = 8

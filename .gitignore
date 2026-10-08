@@ -1,0 +1,13 @@
+# build output (AGENTS.md §2: build/ is build output, ignore)
+build/
+
+# Python bytecode
+__pycache__/
+*.pyc
+
+# local agent/tool state (not project content)
+.freebuff/
+
+# regenerable route-locality gate cache (~48 MB derived data, rebuilt by
+# tools/route/route_locality.py from the model)
+tools/route/gate_cache_*.npz

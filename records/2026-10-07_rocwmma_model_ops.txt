@@ -1,0 +1,104 @@
+# rocWMMA model-op drivers on gfx1201 -- measured 2026-10-07
+
+host: AMD Radeon RX 9070 XT, gfx1201, 32 CU, wave32
+toolchain: hipcc 7.16.26323, ROCm tree G:/ROCM10RT-gfx1201, rocWMMA 2.2.1
+build: hipcc --rocm-path=G:/ROCM10RT-gfx1201/lib/llvm -std=c++17 -O2 --offload-arch=gfx1201
+
+## tools/bench/rocwmma_layout_probe.hip
+device      AMD Radeon RX 9070 XT
+gcnArchName gfx1201
+cu          32   wave 32
+
+16 tiles of 16x16x128, 256 elements each, 4096 elements compared per mode
+
+  [ok] B row_major, A from global     WRONG -- reads K transposed
+        worst_abs 1.989e+01   wrong 4096 / 4096
+  [ok] B row_major, A and B in LDS    WRONG -- memory space is not the cause
+        worst_abs 1.989e+01   wrong 4096 / 4096
+  [ok] B col_major, A from global     EXACT -- the spelling to use
+        worst_abs 3.832e-06   wrong 0 / 4096
+
+  worst_abs is measured against a double-precision accumulation of
+  the same f16 inputs, so it carries f16 input rounding (~1e-3 for a
+  128-long dot of unit-scale operands) plus the f32 mma chain. 2e-6 is
+  the expected size for the correct spelling; 1.4e1 for the wrong one is
+  the same order as the answers themselves.
+
+  CONSEQUENCE: tools/bench/rocwmma_attn.hip declares B col_major in
+  its S = Q . K^T loop for exactly this reason, and its PV loop -- where
+  B is V as a real K x N row-major matrix, ld = head_dim -- keeps
+  row_major. Same file, two different layout_t arguments, both required.
+
+RESULT: PASS
+RUN_RC=0
+
+## tools/bench/rocwmma_moe.hip
+device      AMD Radeon RX 9070 XT
+gcnArchName gfx1201
+cu          32   wave 32
+
+-- grouped MoE expert GEMM, rocWMMA (gfx1201) --
+shape       P=256 pairs, E=16 experts, K=256, N=512, W4 g128
+packed      1114112 bytes (0.5312 B/weight incl. 3 B/group metadata)
+
+WMMA path
+  worst row-relative err  9.018e-07   (tol 2e-03)
+  worst absolute err      1.790e-06
+  outputs checked         131072 / 131072
+  unwritten (sentinel)    0
+  mismatching rows        0
+
+SIMT fallback (always compiled)
+  worst row-relative err  5.715e-04
+  outputs checked         131072 / 131072
+  unwritten (sentinel)    0
+  mismatching rows        0
+
+WMMA vs SIMT
+  worst row-relative diff 5.717e-04, 0 cells over tol
+
+timing (MEASURED, launch-inclusive, best of 5 x 200)
+  0.0413 ms   1.63 TFLOP/s effective
+
+RESULT: PASS
+RUN_RC=0
+
+## tools/bench/rocwmma_attn.hip
+device      AMD Radeon RX 9070 XT
+gcnArchName gfx1201
+cu          32   wave 32
+    row  0  got   0.28589  -0.47412   0.02600   0.15698   ref   0.28589  -0.47412   0.02600   0.15698
+    row  1  got   0.49378  -0.66195   0.00703   0.39361   ref   0.49370  -0.66182   0.00703   0.39356
+    row 63  got  -0.09740  -0.02892  -0.12036   0.13395   ref  -0.09741  -0.02892  -0.12036   0.13397
+
+-- prefill (M=16, all query rows live) --
+  live rows               0..63 of 64, x 8 heads, x 128 head_dim
+  live outputs checked    65536 / 65536
+  unwritten (sentinel)    0  (must be 0)
+  covered, not live       0 cells; skipped 0, non-zero 0
+                          (both must be 0: masked means written-and-zero)
+  worst row-relative err  3.950e-04   (tol 2e-03)
+  worst absolute err      2.403e-04
+  time                    34.251 us  (MEASURED, grid 4x8, launch-inclusive)
+  verdict                 PASS
+
+-- decode  (M=1 of 16, newest token only) --
+  live rows               63..63 of 64, x 8 heads, x 128 head_dim
+  live outputs checked    1024 / 1024
+  unwritten (sentinel)    0  (must be 0)
+  covered, not owned      15360 cells; clobbered 0  (must be 0:
+                           these are other tokens' outputs, preserved intact)
+  worst row-relative err  2.869e-04   (tol 2e-03)
+  worst absolute err      5.424e-05
+  time                    52.225 us  (MEASURED, grid 1x8, launch-inclusive)
+  verdict                 PASS
+
+-- decode M-padding --
+  prefill  34.251 us   decode 52.225 us   ratio 1.52x
+  FLOP ratio prefill:decode = 32x
+  prefill 248.74 GFLOP/s effective, decode 5.02 GFLOP/s effective
+  decode fires 1 of 4 blocks, so ~75.0% of the MMA slots are idle by
+  construction. That is a fact about a 1-token decode, not a defect.
+
+RESULT: PASS
+RUN_RC=0

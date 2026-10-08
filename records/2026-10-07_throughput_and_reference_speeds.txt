@@ -1,0 +1,169 @@
+# Kanjoos speed evidence -- MEASURED on this machine, 2026-10-07
+
+host : AMD Radeon RX 9070 XT, gfx1201, 32 CU as reported, wave32, 16.0 GiB VRAM
+toolchain : hipcc 7.16.26323 | ROCm tree G:/ROCM10RT-gfx1201 | rocWMMA 2.2.1
+build : hipcc --rocm-path=G:/ROCM10RT-gfx1201/lib/llvm -std=c++17 -O2 \
+        --offload-arch=gfx1201 -Xclang -target-feature -Xclang +wavefrontsize32 \
+        -Itools/bench -Ikernels tools/bench/rocwmma_tput.hip -o /tmp/rocwmma_tput.exe
+run   : KNJ_BUILD_ARCH=gfx1201 /tmp/rocwmma_tput.exe
+
+Every number below labelled MEASURED was produced on this machine and this
+GPU by a command whose exit code is recorded. DERIVED numbers are arithmetic
+on a MEASURED number and are labelled at the point of use. Web numbers are
+third-party and labelled REFERENCE.
+
+==============================================================================
+1. rocWMMA model-op throughput at the REAL Qwen3-30B-A3B shapes  (MEASURED)
+==============================================================================
+geometry: hidden 2048, moe_intermediate 768, 128 experts, top-8, 48 layers
+kernel: 16x16x16 wave32 WMMA, block tile 64x64, 16 warps/block, f16 in / f32 out
+
+case                                M x N x K        ms     TFLOP/s   GB/s
+prefill gate+up (grouped)      16384x1536x2048    5.3900    19.12     13.6
+prefill down                   16384x2048x768     2.8791    17.90      9.8
+decode gate+up (grouped)           8x1536x2048    0.0861     0.58     73.5
+decode down                        8x2048x768     0.0484     0.52     65.2
+decode gate+up, tile-limited       1x1536x2048    0.0832     0.08     75.7
+attention QK^T, 1 head, 2048 ctx  2048x2048x128   0.0699    15.36     15.0
+
+MEASURED == above. TFLOP/s is 2*M*N*K / best-of-5 timing.
+GB/s is the packed operand bytes (2 B/weight, f16) actually read per launch.
+
+DEFECTS FOUND BY RUNNING, not by reading (both now fixed in the driver):
+  D1. The first run died with "HIP ERROR unspecified launch failure" on the
+      second case. Cause: dC was sized MMAX*NMAX with NMAX = 2*moe_inter =
+      1536, but the down-projection has N = 2048. The kernel wrote past the
+      allocation. Fixed: NMAX = hidden = 2048. A buffer sized from the wrong
+      tensor shape fails as a crash, not as a wrong number, which is exactly
+      why "the kernel compiled" is not evidence.
+  D2. The driver called knj_guard_check()/knj_guard_code(), which do not
+      exist. The ONLY guard in knj_wmma_guard.h is
+      `int knj_wmma_guard(knj_wmma_dev *out)` returning 0 / 6 / 7. Fixed to
+      the real API; the run now refuses correctly on the wrong arch.
+
+------------------------------------------------------------------------------
+DERIVED (measured per-launch x the model's GEMM count -- NOT end-to-end)
+------------------------------------------------------------------------------
+prefill 2048 tok, expert GEMM only      8269.0 us/layer   396.9 ms total
+  -> expert-GEMM-only prefill ceiling     5159.8 tok/s
+decode 1 tok, expert GEMM only           134.5 us/layer     6.5 ms total
+  -> expert-GEMM-only decode ceiling       154.9 tok/s
+
+READ THE DECODE ROW CAREFULLY. The M=1 and M=8 rows cost almost the SAME
+(83 us vs 86 us). That is not noise and not an accident: at block tile BM=64
+both shapes fall into a single block whose cooperative 64-row x K panel load
+runs in full regardless of how many rows carry data. So the decode loss is
+NOT "1/16 of the WMMA tile is useful" -- it is that the B (weight) panel is
+streamed for a block that is 1/8 (M=8) or 1/64 (M=1) populated. The fix is
+grouping across TOKENS, not a different instruction. The driver prints this
+and the earlier "1x the grouped cost" line is the honest measurement of it.
+
+19.12 TFLOP/s is 39% of the ~48.7 TFLOP/s dense-fp16 figure published for
+the 9070 XT class (REFERENCE, zolotukhin.ai / JohnTDI). Headroom is expected
+and stated as headroom, not as a result: larger BM/BN (128x128), LDS double
+buffering, and dropping the bounds checks from the inner K loop are all
+unimplemented, and the panel load loops here are unpipelined.
+
+==============================================================================
+2. llama.cpp HIP end-to-end on this machine  (MEASURED, external baseline)
+==============================================================================
+harness : /c/Users/rr/OneDrive/Desktop/dxl/llama.cpp-rdnax/build-hip-final/bin
+env     : HIP_PATH=G:\ROCM10RT-gfx1201, PATH=/g/ROCM10RT-gfx1201/bin first
+note    : the MSYS shell must be given the ROCm dir as /g/... ; the same
+          directory spelled G:/... does NOT translate and the exe dies
+          with "error while loading shared libraries" (exit 127). This cost
+          a real debugging cycle.
+
+model A: Qwen3-MOE-4x0.6B-2.4B-Q4_K_M.gguf  (914 MiB, 1.54 B params, MoE)
+  -ngl 99                 pp512  13817.56 t/s   tg128  214.82 t/s   (MEASURED)
+  (prior run of the same config: pp512 14185.23, tg128 209.85 -- run variance)
+
+model B: gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf  (13.26 GiB, 25.23 B, A4B MoE)
+  -ngl 99                 pp512    765.06 t/s   tg128   92.42 t/s   (MEASURED)
+  -ngl 99 --n-cpu-moe 99  pp512    372.13 t/s   tg128   19.70 t/s   (MEASURED)
+
+  => On the REAL target model the streaming penalty today is
+       tg  92.42 -> 19.70  (4.7x loss)
+       pp 765.06 -> 372.13 (2.1x loss)
+     The 13.26 GiB model FITS in 16 GiB VRAM, so at this size the engine has
+     to beat 19.70 t/s and can at most reach 92.42 t/s. That bracket is the
+     honest target, and it is a much tighter one than the small model's.
+
+COHERENCE, end-to-end generation (MEASURED)
+model A, llama-cli, -ngl 99, prompt "The capital of France is":
+  output "Okay, let me think. The question is asking about the capital of
+  France. Hmm, France is a country in Europe, right? The capital is usually
+  listed as Paris. ..."  -- COHERENT.  generation 208.8 t/s.
+model B, llama-completion, -ngl 99, same prompt: DEGENERATE.
+  output collapsed into "the capital of France is / the capital of France is
+  / the capital ability- ... **Paris** ... **_**_**_**". The loader warned:
+    W override 'tokenizer.ggml.add_bos_token' to 'true' for Gemma4
+    W control-looking token: 50 '<|tool_response>' was not control-type
+    W special_eog_ids contains '<|tool_response>', removing '</s>'
+  This build reports itself as "build b0-unknown". Gemma4 support and/or this
+  Unsloth UD dynamic quant are NOT reliable on this harness. CONSEQUENCE:
+  gemma-4-26B-A4B is a fine STREAMING-SIZE target (13.26 GiB, A4B, Spilling
+  on consumer VRAM) but it is NOT a valid COHERENCE oracle on this machine
+  until a build that runs it correctly is found. Do not use it to decide
+  whether our engine is coherent.
+
+==============================================================================
+3. Third-party reference speeds  (REFERENCE -- not this machine)
+==============================================================================
+MoE hot-expert residency -- the Kanjoos thesis, already demonstrated in PoC:
+  llama.cpp issue #20757 (e1n00r, Mar 2026), GPT-OSS-120B on RTX PRO 2000
+  8 GB, two-tier GPU-slot cache + pinned RAM, SLRU + admission filter:
+    cold start            1.9 -  2.5 tok/s   hit 48-56%
+    warming               2.6 -  5.1 tok/s   hit 53-78%
+    steady state         12 -   14  tok/s   hit ~98-100%
+    same hardware, NO cache (pure --cpu-moe)   0.5 - 1 tok/s
+  => ~14-25x from keeping hot experts resident. Same report: MoE routing is
+     skewed, ~15-20% of experts serve ~80% of tokens. This is the single
+     most important external number for Kanjoos: it says the prize is real.
+
+SSD-tier streaming, CPU only:
+  llama.cpp discussion #27149 (jerryjokesalot, Aug 2026), M1 MacBook Pro 16 GB:
+    4.7 tok/s prototype, 100 tok, ~2 GB RAM in use
+    Qwen3-30B-A3B: 345 MB/layer all-experts -> 30 MB/layer 8-active = 11.4x
+    compiled follow-up: 4.46 tok/s at 100% hit, compute ceiling 4.4 tok/s
+    "expert-contiguous relayout": 1 expert = 192 pages vs 6912 (36x less
+     mmap amplification) -- a format finding that applies to our pack too
+  Complementary; different tier. Relevant to phase ordering, not to gfx1201.
+
+gfx1201 / RDNA4 WMMA:
+  JohnTDI-cpu/rdna4-wmma-guide: fused MXFP4 GEMM 40.8 TFLOP/s on Radeon AI
+  PRO R9700 = 53% of FP16 WMMA theoretical; 3.8x faster than dequant +
+  hipBLAS for batch <= 32.
+  zolotukhin.ai: RDNA4 FP16 WMMA 512 -> 1024 FLOPS/CU (2x RDNA3), prefill 2x
+  per CU. Published dense-fp16 theoretical ~48.7 TFLOP/s for this class.
+  Our MEASURED 19.12 TFLOP/s = 39% of that. The 40.8 MXFP4 figure says a
+  well-tiled RDNA4 GEMM reaches 53%, so ~26 TFLOP/s is a credible next
+  milestone for our tiled path.
+
+Cross-check of the same model class elsewhere (REFERENCE):
+  9070 XT, ROCm llama.cpp, Llama-2-7B Q4_0           pp512 5055   tg128 101
+  ROCm 7.2.4 advertised 9070 XT prefill              4253 t/s
+  Qwen3-Coder-30B-A3B Q4_K_M SPILLING on 9070 XT      ROCm pp 274 / gen 30.6
+                                                      Vulkan pp 529 / gen 22.6
+  Ollama on 9070 XT: gpt-oss:20b MoE 91.9 t/s, qwen3:14b 52.2 t/s,
+                     qwen3.5:27b Q4 (~17 GB, spills) 6.3 t/s
+
+==============================================================================
+4. WHAT THIS DOES AND DOES NOT ESTABLISH
+==============================================================================
+ESTABLISHED:
+  - rocWMMA runs on gfx1201 and produces correct results (moe, attn, layout)
+  - our tiled GEMM reaches 19.12 TFLOP/s at prefill shapes, 39% of class peak
+  - the real target model's streaming bracket on this machine is 19.70..92.42
+    t/s for tg, measured with the reference implementation
+  - the hot-expert-residency prize is ~14-25x, from an independent PoC
+
+NOT ESTABLISHED -- and the user's completion gate rests on these:
+  - Kanjoos does NOT yet generate a single token end to end. There is no
+    GGUF loader, no tokenizer, no sampling loop, no KV cache wired to real
+    weights. Every rocWMMA result above is a KERNEL result against a host
+    oracle. A kernel that is correct on synthetic operands has not been shown
+    to be correct on real router-chosen expert rows from a real GGUF.
+  - Therefore "inferences correctly", "is coherent", and "good prefill and
+    token gen" are all still OPEN. They are not claimed here and must not be
+    inferred from the kernel evidence above.

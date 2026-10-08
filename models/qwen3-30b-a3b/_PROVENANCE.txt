@@ -1,0 +1,5 @@
+source: HuggingFace Hub Qwen/Qwen3-30B-A3B config.json
+fetched: 2026-10-07 (this run)
+sha256: 2850ddb3bf7aecad20b611e2d44f3077fc8193f4827c93beddd4c02ad63c2297
+doc cites: 2850ddb3c7d9bb7a271aea2a05355a2c3fb341cc7e941340145f565e34756bd4 (docs/00-verified-facts.md section 8.10)
+match: sha256 prefix 2850ddb3 agrees with the doc citation.

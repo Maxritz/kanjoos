@@ -1,0 +1,841 @@
+{
+  "source": "Qwen/Qwen3-30B-A3B",
+  "kind": "target-gates",
+  "caveat": "PROXY: the target's REAL gate matrices applied to REAL hidden states from knj_p07 (same family, same hidden width 2048). Not the target model's own forward pass.",
+  "num_experts": 128,
+  "top_k": 8,
+  "layers": 48,
+  "aggregate": {
+    "used_min": 70,
+    "used_med": 112.5,
+    "used_max": 127,
+    "ent_min": 3.859127182721784,
+    "ent_med": 5.331430589153234,
+    "ent_max": 6.357221532718391,
+    "reuse_min": 0.09370925684485007,
+    "reuse_med": 0.3854302477183833,
+    "reuse_max": 0.7760756192959583,
+    "c25_min": 63.0,
+    "c25_med": 86.0,
+    "c25_max": 98.0,
+    "slots_grid": [
+      8,
+      13,
+      26,
+      38,
+      51,
+      64,
+      77,
+      90,
+      102,
+      115,
+      128
+    ],
+    "static": {
+      "8": 0.45987955729166663,
+      "13": 0.610107421875,
+      "26": 0.81201171875,
+      "38": 0.892578125,
+      "51": 0.9427897135416667,
+      "64": 0.969970703125,
+      "77": 0.9850260416666666,
+      "90": 0.9930013020833333,
+      "102": 0.99755859375,
+      "115": 1.0,
+      "128": 1.0
+    },
+    "lru": {
+      "8": 0.32218424479166663,
+      "13": 0.4580078125,
+      "26": 0.671875,
+      "38": 0.7933756510416666,
+      "51": 0.8683268229166666,
+      "64": 0.91552734375,
+      "77": 0.9434407552083334,
+      "90": 0.9628092447916667,
+      "102": 0.9744466145833334,
+      "115": 0.981689453125,
+      "128": 1.0
+    },
+    "min_slots_static": {
+      "0.9": 51,
+      "0.95": 64,
+      "0.99": 90
+    },
+    "min_slots_lru": {
+      "0.9": 64,
+      "0.95": 90,
+      "0.99": 128
+    }
+  },
+  "per_layer": [
+    {
+      "n_tokens": 768,
+      "top_k": 8,
+      "num_experts": 128,
+      "experts_ever_used": 127,
+      "concentration_pct_of_selections": {
+        "top25%": 63,
+        "top50%": 83,
+        "top75%": 95
+      },
+      "entropy_bits": 6.357221532718391,
+      "entropy_max_bits": 7.0,
+      "temporal_reuse": 0.09370925684485007,
+      "temporal_jaccard": 0.0519573429612543,
+      "temporal_new_expert_rate": 0.9062907431551499
+    },
+    {
+      "n_tokens": 768,
+      "top_k": 8,
+      "num_experts": 128,
+      "experts_ever_used": 125,
+      "concentration_pct_of_selections": {
+        "top25%": 66,
+        "top50%": 88,
+        "top75%": 98
+      },
+      "entropy_bits": 6.214246622137521,
+      "entropy_max_bits": 7.0,
+      "temporal_reuse": 0.15417209908735333,
+      "temporal_jaccard": 0.09140368540629296,
+      "temporal_new_expert_rate": 0.8458279009126467
+    },
+    {
+      "n_tokens": 768,
+      "top_k": 8,
+      "num_experts": 128,
+      "experts_ever_used": 105,
+      "concentration_pct_of_selections": {
+        "top25%": 80,
+        "top50%": 97,
+        "top75%": 100
+      },
+      "entropy_bits": 5.597339990035638,
+      "entropy_max_bits": 7.0,
+      "temporal_reuse": 0.2754237288135593,
+      "temporal_jaccard": 0.16996050451070008,
+      "temporal_new_expert_rate": 0.7245762711864407
+    },
+    {
+      "n_tokens": 768,
+      "top_k": 8,
+      "num_experts": 128,
+      "experts_ever_used": 111,
+      "concentration_pct_of_selections": {
+        "top25%": 83,
+        "top50%": 97,
+        "top75%": 100
+      },
+      "entropy_bits": 5.463989693873474,
+      "entropy_max_bits": 7.0,
+      "temporal_reuse": 0.31502607561929596,
+      "temporal_jaccard": 0.19852637584058705,
+      "temporal_new_expert_rate": 0.684973924380704
+    },
+    {
+      "n_tokens": 768,
+      "top_k": 8,
+      "num_experts": 128,
+      "experts_ever_used": 114,
+      "concentration_pct_of_selections": {
+        "top25%": 81,
+        "top50%": 96,
+        "top75%": 99
+      },
+      "entropy_bits": 5.558901157443724,
+      "entropy_max_bits": 7.0,
+      "temporal_reuse": 0.30198826597131684,
+      "temporal_jaccard": 0.18881440159145504,
+      "temporal_new_expert_rate": 0.6980117340286831
+    },
+    {
+      "n_tokens": 768,
+      "top_k": 8,
+      "num_experts": 128,
+      "experts_ever_used": 119,
+      "concentration_pct_of_selections": {
+        "top25%": 75,
+        "top50%": 93,
+        "top75%": 99
+      },
+      "entropy_bits": 5.8969411725226,
+      "entropy_max_bits": 7.0,
+      "temporal_reuse": 0.25765971316818775,
+      "temporal_jaccard": 0.16477145916520103,
+      "temporal_new_expert_rate": 0.7423402868318123
+    },
+    {
+      "n_tokens": 768,
+      "top_k": 8,
+      "num_experts": 128,
+      "experts_ever_used": 119,
+      "concentration_pct_of_selections": {
+        "top25%": 73,
+        "top50%": 94,
+        "top75%": 99
+      },
+      "entropy_bits": 5.973272719168981,
+      "entropy_max_bits": 7.0,
+      "temporal_reuse": 0.23191003911342895,
+      "temporal_jaccard": 0.14520829018873346,
+      "temporal_new_expert_rate": 0.768089960886571
+    },
+    {
+      "n_tokens": 768,
+      "top_k": 8,
+      "num_experts": 128,
+      "experts_ever_used": 114,
+      "concentration_pct_of_selections": {
+        "top25%": 76,
+        "top50%": 94,
+        "top75%": 99
+      },
+      "entropy_bits": 5.811964340545981,
+      "entropy_max_bits": 7.0,
+      "temporal_reuse": 0.29465449804432853,
+      "temporal_jaccard": 0.19073219985866663,
+      "temporal_new_expert_rate": 0.7053455019556715
+    },
+    {
+      "n_tokens": 768,
+      "top_k": 8,
+      "num_experts": 128,
+      "experts_ever_used": 120,
+      "concentration_pct_of_selections": {
+        "top25%": 77,
+        "top50%": 94,
+        "top75%": 99
+      },
+      "entropy_bits": 5.781689006430921,
+      "entropy_max_bits": 7.0,
+      "temporal_reuse": 0.3223598435462842,
+      "temporal_jaccard": 0.20807580077462737,
+      "temporal_new_expert_rate": 0.6776401564537158
+    },
+    {
+      "n_tokens": 768,
+      "top_k": 8,
+      "num_experts": 128,
+      "experts_ever_used": 116,
+      "concentration_pct_of_selections": {
+        "top25%": 73,
+        "top50%": 93,
+        "top75%": 99
+      },
+      "entropy_bits": 5.887612840540811,
+      "entropy_max_bits": 7.0,
+      "temporal_reuse": 0.31486310299869624,
+      "temporal_jaccard": 0.202482292443179,
+      "temporal_new_expert_rate": 0.6851368970013038
+    },
+    {
+      "n_tokens": 768,
+      "top_k": 8,
+      "num_experts": 128,
+      "experts_ever_used": 114,
+      "concentration_pct_of_selections": {
+        "top25%": 78,
+        "top50%": 95,
+        "top75%": 99
+      },
+      "entropy_bits": 5.6492204742174,
+      "entropy_max_bits": 7.0,
+      "temporal_reuse": 0.37190352020860495,
+      "temporal_jaccard": 0.24294940174992324,
+      "temporal_new_expert_rate": 0.628096479791395
+    },
+    {
+      "n_tokens": 768,
+      "top_k": 8,
+      "num_experts": 128,
+      "experts_ever_used": 98,
+      "concentration_pct_of_selections": {
+        "top25%": 84,
+        "top50%": 97,
+        "top75%": 100
+      },
+      "entropy_bits": 5.440195230364857,
+      "entropy_max_bits": 7.0,
+      "temporal_reuse": 0.3895045632333768,
+      "temporal_jaccard": 0.25736410482173194,
+      "temporal_new_expert_rate": 0.6104954367666232
+    },
+    {
+      "n_tokens": 768,
+      "top_k": 8,
+      "num_experts": 128,
+      "experts_ever_used": 114,
+      "concentration_pct_of_selections": {
+        "top25%": 73,
+        "top50%": 94,
+        "top75%": 99
+      },
+      "entropy_bits": 5.897766844054748,
+      "entropy_max_bits": 7.0,
+      "temporal_reuse": 0.3305084745762712,
+      "temporal_jaccard": 0.21214795634613107,
+      "temporal_new_expert_rate": 0.6694915254237288
+    },
+    {
+      "n_tokens": 768,
+      "top_k": 8,
+      "num_experts": 128,
+      "experts_ever_used": 112,
+      "concentration_pct_of_selections": {
+        "top25%": 79,
+        "top50%": 95,
+        "top75%": 100
+      },
+      "entropy_bits": 5.6936650905873485,
+      "entropy_max_bits": 7.0,
+      "temporal_reuse": 0.3658735332464146,
+      "temporal_jaccard": 0.23882404716824532,
+      "temporal_new_expert_rate": 0.6341264667535854
+    },
+    {
+      "n_tokens": 768,
+      "top_k": 8,
+      "num_experts": 128,
+      "experts_ever_used": 112,
+      "concentration_pct_of_selections": {
+        "top25%": 79,
+        "top50%": 95,
+        "top75%": 99
+      },
+      "entropy_bits": 5.690524391099358,
+      "entropy_max_bits": 7.0,
+      "temporal_reuse": 0.37222946544980445,
+      "temporal_jaccard": 0.2424172379843827,
+      "temporal_new_expert_rate": 0.6277705345501956
+    },
+    {
+      "n_tokens": 768,
+      "top_k": 8,
+      "num_experts": 128,
+      "experts_ever_used": 113,
+      "concentration_pct_of_selections": {
+        "top25%": 86,
+        "top50%": 97,
+        "top75%": 100
+      },
+      "entropy_bits": 5.278247591151933,
+      "entropy_max_bits": 7.0,
+      "temporal_reuse": 0.44784876140808344,
+      "temporal_jaccard": 0.3071496372669775,
+      "temporal_new_expert_rate": 0.5521512385919165
+    },
+    {
+      "n_tokens": 768,
+      "top_k": 8,
+      "num_experts": 128,
+      "experts_ever_used": 111,
+      "concentration_pct_of_selections": {
+        "top25%": 79,
+        "top50%": 95,
+        "top75%": 100
+      },
+      "entropy_bits": 5.716291408887715,
+      "entropy_max_bits": 7.0,
+      "temporal_reuse": 0.3557692307692308,
+      "temporal_jaccard": 0.22941526096676032,
+      "temporal_new_expert_rate": 0.6442307692307692
+    },
+    {
+      "n_tokens": 768,
+      "top_k": 8,
+      "num_experts": 128,
+      "experts_ever_used": 120,
+      "concentration_pct_of_selections": {
+        "top25%": 71,
+        "top50%": 92,
+        "top75%": 98
+      },
+      "entropy_bits": 5.947582287245289,
+      "entropy_max_bits": 7.0,
+      "temporal_reuse": 0.3285528031290743,
+      "temporal_jaccard": 0.21103668170160997,
+      "temporal_new_expert_rate": 0.6714471968709257
+    },
+    {
+      "n_tokens": 768,
+      "top_k": 8,
+      "num_experts": 128,
+      "experts_ever_used": 121,
+      "concentration_pct_of_selections": {
+        "top25%": 82,
+        "top50%": 96,
+        "top75%": 99
+      },
+      "entropy_bits": 5.557627529763716,
+      "entropy_max_bits": 7.0,
+      "temporal_reuse": 0.3728813559322034,
+      "temporal_jaccard": 0.2460765947076247,
+      "temporal_new_expert_rate": 0.6271186440677966
+    },
+    {
+      "n_tokens": 768,
+      "top_k": 8,
+      "num_experts": 128,
+      "experts_ever_used": 125,
+      "concentration_pct_of_selections": {
+        "top25%": 77,
+        "top50%": 94,
+        "top75%": 99
+      },
+      "entropy_bits": 5.747173319254005,
+      "entropy_max_bits": 7.0,
+      "temporal_reuse": 0.34631681877444587,
+      "temporal_jaccard": 0.22243539453448188,
+      "temporal_new_expert_rate": 0.6536831812255541
+    },
+    {
+      "n_tokens": 768,
+      "top_k": 8,
+      "num_experts": 128,
+      "experts_ever_used": 122,
+      "concentration_pct_of_selections": {
+        "top25%": 73,
+        "top50%": 93,
+        "top75%": 99
+      },
+      "entropy_bits": 5.950259102185894,
+      "entropy_max_bits": 7.0,
+      "temporal_reuse": 0.298728813559322,
+      "temporal_jaccard": 0.18761597666421656,
+      "temporal_new_expert_rate": 0.701271186440678
+    },
+    {
+      "n_tokens": 768,
+      "top_k": 8,
+      "num_experts": 128,
+      "experts_ever_used": 122,
+      "concentration_pct_of_selections": {
+        "top25%": 78,
+        "top50%": 94,
+        "top75%": 99
+      },
+      "entropy_bits": 5.642037217160813,
+      "entropy_max_bits": 7.0,
+      "temporal_reuse": 0.3603324641460235,
+      "temporal_jaccard": 0.23594287792462498,
+      "temporal_new_expert_rate": 0.6396675358539765
+    },
+    {
+      "n_tokens": 768,
+      "top_k": 8,
+      "num_experts": 128,
+      "experts_ever_used": 121,
+      "concentration_pct_of_selections": {
+        "top25%": 82,
+        "top50%": 95,
+        "top75%": 99
+      },
+      "entropy_bits": 5.561078752356118,
+      "entropy_max_bits": 7.0,
+      "temporal_reuse": 0.3621251629726206,
+      "temporal_jaccard": 0.2346950745907721,
+      "temporal_new_expert_rate": 0.6378748370273795
+    },
+    {
+      "n_tokens": 768,
+      "top_k": 8,
+      "num_experts": 128,
+      "experts_ever_used": 118,
+      "concentration_pct_of_selections": {
+        "top25%": 90,
+        "top50%": 97,
+        "top75%": 100
+      },
+      "entropy_bits": 4.999146960800383,
+      "entropy_max_bits": 7.0,
+      "temporal_reuse": 0.4796284224250326,
+      "temporal_jaccard": 0.3360751373789183,
+      "temporal_new_expert_rate": 0.5203715775749673
+    },
+    {
+      "n_tokens": 768,
+      "top_k": 8,
+      "num_experts": 128,
+      "experts_ever_used": 107,
+      "concentration_pct_of_selections": {
+        "top25%": 90,
+        "top50%": 98,
+        "top75%": 100
+      },
+      "entropy_bits": 5.043905405616892,
+      "entropy_max_bits": 7.0,
+      "temporal_reuse": 0.44801173402868316,
+      "temporal_jaccard": 0.3054213930354739,
+      "temporal_new_expert_rate": 0.5519882659713169
+    },
+    {
+      "n_tokens": 768,
+      "top_k": 8,
+      "num_experts": 128,
+      "experts_ever_used": 107,
+      "concentration_pct_of_selections": {
+        "top25%": 88,
+        "top50%": 97,
+        "top75%": 100
+      },
+      "entropy_bits": 5.150334476611479,
+      "entropy_max_bits": 7.0,
+      "temporal_reuse": 0.4264993481095176,
+      "temporal_jaccard": 0.28621846066435375,
+      "temporal_new_expert_rate": 0.5735006518904824
+    },
+    {
+      "n_tokens": 768,
+      "top_k": 8,
+      "num_experts": 128,
+      "experts_ever_used": 92,
+      "concentration_pct_of_selections": {
+        "top25%": 96,
+        "top50%": 99,
+        "top75%": 100
+      },
+      "entropy_bits": 4.485489517922272,
+      "entropy_max_bits": 7.0,
+      "temporal_reuse": 0.6012059973924381,
+      "temporal_jaccard": 0.44953855358027456,
+      "temporal_new_expert_rate": 0.3987940026075619
+    },
+    {
+      "n_tokens": 768,
+      "top_k": 8,
+      "num_experts": 128,
+      "experts_ever_used": 78,
+      "concentration_pct_of_selections": {
+        "top25%": 98,
+        "top50%": 100,
+        "top75%": 100
+      },
+      "entropy_bits": 3.859127182721784,
+      "entropy_max_bits": 7.0,
+      "temporal_reuse": 0.7760756192959583,
+      "temporal_jaccard": 0.6599436200479225,
+      "temporal_new_expert_rate": 0.22392438070404175
+    },
+    {
+      "n_tokens": 768,
+      "top_k": 8,
+      "num_experts": 128,
+      "experts_ever_used": 105,
+      "concentration_pct_of_selections": {
+        "top25%": 93,
+        "top50%": 98,
+        "top75%": 100
+      },
+      "entropy_bits": 4.7469779948374,
+      "entropy_max_bits": 7.0,
+      "temporal_reuse": 0.5161342894393742,
+      "temporal_jaccard": 0.36584238592061274,
+      "temporal_new_expert_rate": 0.4838657105606258
+    },
+    {
+      "n_tokens": 768,
+      "top_k": 8,
+      "num_experts": 128,
+      "experts_ever_used": 112,
+      "concentration_pct_of_selections": {
+        "top25%": 93,
+        "top50%": 98,
+        "top75%": 100
+      },
+      "entropy_bits": 4.945097937561175,
+      "entropy_max_bits": 7.0,
+      "temporal_reuse": 0.4380704041720991,
+      "temporal_jaccard": 0.3019445280201473,
+      "temporal_new_expert_rate": 0.5619295958279009
+    },
+    {
+      "n_tokens": 768,
+      "top_k": 8,
+      "num_experts": 128,
+      "experts_ever_used": 111,
+      "concentration_pct_of_selections": {
+        "top25%": 94,
+        "top50%": 99,
+        "top75%": 100
+      },
+      "entropy_bits": 4.753683786542623,
+      "entropy_max_bits": 7.0,
+      "temporal_reuse": 0.49103650586701436,
+      "temporal_jaccard": 0.3553568552264771,
+      "temporal_new_expert_rate": 0.5089634941329857
+    },
+    {
+      "n_tokens": 768,
+      "top_k": 8,
+      "num_experts": 128,
+      "experts_ever_used": 94,
+      "concentration_pct_of_selections": {
+        "top25%": 94,
+        "top50%": 99,
+        "top75%": 100
+      },
+      "entropy_bits": 4.643715129952189,
+      "entropy_max_bits": 7.0,
+      "temporal_reuse": 0.5492177314211213,
+      "temporal_jaccard": 0.408341911601364,
+      "temporal_new_expert_rate": 0.4507822685788787
+    },
+    {
+      "n_tokens": 768,
+      "top_k": 8,
+      "num_experts": 128,
+      "experts_ever_used": 111,
+      "concentration_pct_of_selections": {
+        "top25%": 90,
+        "top50%": 98,
+        "top75%": 100
+      },
+      "entropy_bits": 5.128877367173073,
+      "entropy_max_bits": 7.0,
+      "temporal_reuse": 0.39553455019556716,
+      "temporal_jaccard": 0.27003374721758033,
+      "temporal_new_expert_rate": 0.6044654498044328
+    },
+    {
+      "n_tokens": 768,
+      "top_k": 8,
+      "num_experts": 128,
+      "experts_ever_used": 114,
+      "concentration_pct_of_selections": {
+        "top25%": 86,
+        "top50%": 97,
+        "top75%": 100
+      },
+      "entropy_bits": 5.384613587154534,
+      "entropy_max_bits": 7.0,
+      "temporal_reuse": 0.33376792698826596,
+      "temporal_jaccard": 0.21733630703643741,
+      "temporal_new_expert_rate": 0.666232073011734
+    },
+    {
+      "n_tokens": 768,
+      "top_k": 8,
+      "num_experts": 128,
+      "experts_ever_used": 117,
+      "concentration_pct_of_selections": {
+        "top25%": 89,
+        "top50%": 97,
+        "top75%": 99
+      },
+      "entropy_bits": 5.114488532986452,
+      "entropy_max_bits": 7.0,
+      "temporal_reuse": 0.4320404172099087,
+      "temporal_jaccard": 0.2997741357584904,
+      "temporal_new_expert_rate": 0.5679595827900913
+    },
+    {
+      "n_tokens": 768,
+      "top_k": 8,
+      "num_experts": 128,
+      "experts_ever_used": 102,
+      "concentration_pct_of_selections": {
+        "top25%": 93,
+        "top50%": 99,
+        "top75%": 100
+      },
+      "entropy_bits": 4.890334002396787,
+      "entropy_max_bits": 7.0,
+      "temporal_reuse": 0.46153846153846156,
+      "temporal_jaccard": 0.32136474274675053,
+      "temporal_new_expert_rate": 0.5384615384615384
+    },
+    {
+      "n_tokens": 768,
+      "top_k": 8,
+      "num_experts": 128,
+      "experts_ever_used": 102,
+      "concentration_pct_of_selections": {
+        "top25%": 93,
+        "top50%": 98,
+        "top75%": 100
+      },
+      "entropy_bits": 4.597226127397529,
+      "entropy_max_bits": 7.0,
+      "temporal_reuse": 0.5700782268578879,
+      "temporal_jaccard": 0.4434044009011414,
+      "temporal_new_expert_rate": 0.4299217731421121
+    },
+    {
+      "n_tokens": 768,
+      "top_k": 8,
+      "num_experts": 128,
+      "experts_ever_used": 99,
+      "concentration_pct_of_selections": {
+        "top25%": 93,
+        "top50%": 99,
+        "top75%": 100
+      },
+      "entropy_bits": 4.95000979236764,
+      "entropy_max_bits": 7.0,
+      "temporal_reuse": 0.4144393741851369,
+      "temporal_jaccard": 0.27848732464117076,
+      "temporal_new_expert_rate": 0.5855606258148631
+    },
+    {
+      "n_tokens": 768,
+      "top_k": 8,
+      "num_experts": 128,
+      "experts_ever_used": 99,
+      "concentration_pct_of_selections": {
+        "top25%": 92,
+        "top50%": 99,
+        "top75%": 100
+      },
+      "entropy_bits": 4.9416957738205385,
+      "entropy_max_bits": 7.0,
+      "temporal_reuse": 0.43953715775749674,
+      "temporal_jaccard": 0.30244056971566746,
+      "temporal_new_expert_rate": 0.5604628422425033
+    },
+    {
+      "n_tokens": 768,
+      "top_k": 8,
+      "num_experts": 128,
+      "experts_ever_used": 93,
+      "concentration_pct_of_selections": {
+        "top25%": 93,
+        "top50%": 99,
+        "top75%": 100
+      },
+      "entropy_bits": 4.9051701333329945,
+      "entropy_max_bits": 7.0,
+      "temporal_reuse": 0.42063233376792697,
+      "temporal_jaccard": 0.2868779489379229,
+      "temporal_new_expert_rate": 0.579367666232073
+    },
+    {
+      "n_tokens": 768,
+      "top_k": 8,
+      "num_experts": 128,
+      "experts_ever_used": 87,
+      "concentration_pct_of_selections": {
+        "top25%": 94,
+        "top50%": 99,
+        "top75%": 100
+      },
+      "entropy_bits": 4.697788981446818,
+      "entropy_max_bits": 7.0,
+      "temporal_reuse": 0.48810299869621904,
+      "temporal_jaccard": 0.34337584767832485,
+      "temporal_new_expert_rate": 0.5118970013037809
+    },
+    {
+      "n_tokens": 768,
+      "top_k": 8,
+      "num_experts": 128,
+      "experts_ever_used": 85,
+      "concentration_pct_of_selections": {
+        "top25%": 94,
+        "top50%": 100,
+        "top75%": 100
+      },
+      "entropy_bits": 4.800920670435767,
+      "entropy_max_bits": 7.0,
+      "temporal_reuse": 0.458116036505867,
+      "temporal_jaccard": 0.31477359378272024,
+      "temporal_new_expert_rate": 0.541883963494133
+    },
+    {
+      "n_tokens": 768,
+      "top_k": 8,
+      "num_experts": 128,
+      "experts_ever_used": 70,
+      "concentration_pct_of_selections": {
+        "top25%": 97,
+        "top50%": 100,
+        "top75%": 100
+      },
+      "entropy_bits": 4.392830629126488,
+      "entropy_max_bits": 7.0,
+      "temporal_reuse": 0.583116036505867,
+      "temporal_jaccard": 0.4392899003068494,
+      "temporal_new_expert_rate": 0.41688396349413304
+    },
+    {
+      "n_tokens": 768,
+      "top_k": 8,
+      "num_experts": 128,
+      "experts_ever_used": 115,
+      "concentration_pct_of_selections": {
+        "top25%": 90,
+        "top50%": 97,
+        "top75%": 100
+      },
+      "entropy_bits": 5.175427718022304,
+      "entropy_max_bits": 7.0,
+      "temporal_reuse": 0.40563885267275096,
+      "temporal_jaccard": 0.27618370330234737,
+      "temporal_new_expert_rate": 0.594361147327249
+    },
+    {
+      "n_tokens": 768,
+      "top_k": 8,
+      "num_experts": 128,
+      "experts_ever_used": 116,
+      "concentration_pct_of_selections": {
+        "top25%": 88,
+        "top50%": 96,
+        "top75%": 99
+      },
+      "entropy_bits": 5.248863300368805,
+      "entropy_max_bits": 7.0,
+      "temporal_reuse": 0.3813559322033898,
+      "temporal_jaccard": 0.2608671351826502,
+      "temporal_new_expert_rate": 0.6186440677966102
+    },
+    {
+      "n_tokens": 768,
+      "top_k": 8,
+      "num_experts": 128,
+      "experts_ever_used": 121,
+      "concentration_pct_of_selections": {
+        "top25%": 90,
+        "top50%": 97,
+        "top75%": 99
+      },
+      "entropy_bits": 5.0466241222682235,
+      "entropy_max_bits": 7.0,
+      "temporal_reuse": 0.4369295958279009,
+      "temporal_jaccard": 0.3070885944419191,
+      "temporal_new_expert_rate": 0.5630704041720991
+    },
+    {
+      "n_tokens": 768,
+      "top_k": 8,
+      "num_experts": 128,
+      "experts_ever_used": 118,
+      "concentration_pct_of_selections": {
+        "top25%": 84,
+        "top50%": 96,
+        "top75%": 99
+      },
+      "entropy_bits": 5.433387059710433,
+      "entropy_max_bits": 7.0,
+      "temporal_reuse": 0.34207953063885266,
+      "temporal_jaccard": 0.22687739610816535,
+      "temporal_new_expert_rate": 0.6579204693611473
+    },
+    {
+      "n_tokens": 768,
+      "top_k": 8,
+      "num_experts": 128,
+      "experts_ever_used": 109,
+      "concentration_pct_of_selections": {
+        "top25%": 89,
+        "top50%": 98,
+        "top75%": 100
+      },
+      "entropy_bits": 5.048062208070779,
+      "entropy_max_bits": 7.0,
+      "temporal_reuse": 0.42258800521512385,
+      "temporal_jaccard": 0.2933205864105473,
+      "temporal_new_expert_rate": 0.5774119947848761
+    }
+  ]
+}

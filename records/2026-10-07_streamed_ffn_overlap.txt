@@ -1,0 +1,307 @@
+# ============================================================================
+# Kanjoos gfx1201 streamed FFN -- allocation trap, staging reuse, depth-2
+# overlap. Raw evidence, 2026-10-07. Companion to CODING-LOG.PENDING.md
+# Phase 34 (which corrects the "Still open" of Phase 33).
+# ============================================================================
+#
+# Request being answered: "continue" -- the open item from Phase 33: the
+#   streaming path ran ~26x slower than resident (150.8 ms vs 5.764 ms) with
+#   no overlap, 50% slot occupancy, and per-read staging allocation.
+#
+# SCOPE OF THIS RECORD, STATED BEFORE THE NUMBERS:
+#   Still ONE LAYER (layer 0) of one model, same job as Phase 33. What this
+#   record adds: a measured decomposition of the Phase-33 gap into (a) a
+#   host-side allocation trap (hipHostMalloc/hipHostFree per staging buffer),
+#   (b) serialisation, and (c) device stream time; and the measured effect of
+#   fixing (a) and (b) under three controlled configurations. What it does
+#   NOT prove: multi-layer coherence, prefetch hit rate, token generation,
+#   or anything about a model larger than VRAM. Deadline behaviour remains
+#   unexercised (vacuous deadline, stated again below).
+#
+# host      : Windows 11, 32 threads
+# device    : AMD Radeon RX 9070 XT, gfx1201, RDNA4, wave32, 15.92 GiB, 8 MiB L2
+# model     : Qwen3-MOE-4x0.6B-2.4B-Q4_K_M.gguf  (964,653,184 B, qwen3moe)
+# job       : build/q4k/layer00.job   (layer 0: gate/up Q4_K, down Q6_K, real router)
+# tokens    : 512 (1024 routed pairs, top-2 of 4 experts)
+# slots     : 2 x 2.4609375 MiB (slot pool 4.922 MiB = 21.1% of the 23.344 MiB bank)
+#
+# The three configurations, one variable apart:
+#   0 serial/churn   = Phase 33 behaviour exactly: 1 item in flight, staging
+#                      hipHostMalloc'd before every read, hipHostFree'd on drop
+#   1 serial/reuse   = staging pooled and reused (C7's pre-registered bounce
+#                      buffers), pool pre-registered before the timed window
+#   2 overlap/reuse  = additionally NSLOTS=2 items in flight, demand runs 2
+#                      ahead of compute; retire is drain-based, not serialised
+#
+# Traps added (all MEASURED, all still in the driver):
+#   NvmeReader::busy_ns_       reader-thread fread time, queue waits excluded
+#   HipTransfer::h2d_ns_       H2D submit -> first DONE poll (host-visible latency)
+#   PinnedArena::host_alloc_ns_ / host_free_ns_   pin/unpin cost inside the arena
+#   RunStats wait buckets      host spin time, attributed by the object's state
+#
+# Build line (unchanged from Phase 33):
+#   hipcc --rocm-path="G:/ROCM10RT-gfx1201/lib/llvm" -std=c++17 -O2 \
+#     --offload-arch=gfx1201 \
+#     -Xclang -target-feature -Xclang +wavefrontsize32 \
+#     -I tools/bench -I kernels -I . \
+#     tools/bench/q4k_stream_ffn.hip src/residency/residency.cpp \
+#     -o build/q4k/q4k_stream_ffn.exe
+#
+# Run line:
+#   KNJ_BUILD_ARCH=gfx1201 HIP_VISIBLE_DEVICES=0 \
+#     ./build/q4k/q4k_stream_ffn.exe build/q4k/layer00.job build/q4k/dump 512 2
+#
+# Three consecutive runs of the final binary, all RUN_RC=0, all bit-identical
+# in every correctness field. NOTE on the pin column of the per-pass table:
+# wall_ms EXCLUDES pool pre-registration (it happens before the timed
+# window); pin_ns INCLUDES it. The two must not be summed.
+#
+########################## RUN 1 ##########################
+=== q4k_stream_ffn -- C9 residency + C8 slots + C11 transfers ===
+device      AMD Radeon RX 9070 XT (gfx1201)
+cu          32   wave 32   threads/block 64
+layer       0   hidden=1024 ff=3072 experts=4 topk=2
+tokens      512   pairs=1024
+slab bytes  gate=1769472 up=1769472 down=2580480 (per expert)
+routing     e0=254 e1=256 e2=253 e3=261 
+
+--- PART 1: resident (whole bank on device) ---
+
+--- PART 2: streamed (C9 residency, 2 slot(s) of 2.46 MiB) ---
+slot pool   2 x 2.461 MiB = 4.922 MiB   (bank would be 23.344 MiB)
+  configs:
+    0 serial/churn   1 work item in flight, staging allocated per read
+    1 serial/reuse   same, staging pooled and reused (C7 bounce buffers)
+    2 overlap/reuse  2 items in flight, demand runs 2 ahead of compute
+
+--- PART 3: bit-for-bit streamed vs resident (I1) ---
+  gate (Q4_K) serial/churn       bytes-identical=yes  differing=0
+  up   (Q4_K) serial/churn       bytes-identical=yes  differing=0
+  down (Q6_K) serial/churn       bytes-identical=yes  differing=0
+  gate (Q4_K) serial/reuse       bytes-identical=yes  differing=0
+  up   (Q4_K) serial/reuse       bytes-identical=yes  differing=0
+  down (Q6_K) serial/reuse       bytes-identical=yes  differing=0
+  gate (Q4_K) overlap/reuse      bytes-identical=yes  differing=0
+  up   (Q4_K) overlap/reuse      bytes-identical=yes  differing=0
+  down (Q6_K) overlap/reuse      bytes-identical=yes  differing=0
+
+--- streamed down vs verified gguf-py decode (Q6_K) ---
+  down (streamed, Q6_K)    rows=1024   worst-row-rel=1.062e-05  worst-abs=8.169e-05  unwritten=0  rows-over-tol=0
+
+--- streamed layer output (weighted top-k sum) ---
+  layer0 MoE FFN out       rows=512    worst-row-rel=5.774e-08  worst-abs=4.165e-07  unwritten=0  rows-over-tol=0
+
+--- PART 4: where the wall time went (MEASURED) ---
+  config          pass      wall     stream  nvme-read      h2d       pin     unpin      wait
+  serial/churn    A       86.699     81.916      2.436    2.833    45.928    28.287    37.524
+  serial/churn    B       48.755     41.125      1.560    1.426    27.953    14.065    18.778
+  serial/reuse    A       11.144     10.369      2.072    2.616     5.400     0.000     8.260
+  serial/reuse    B        6.867      6.095      1.637    1.520     6.979     0.000     4.889
+  overlap/reuse   A        9.420      8.719      2.263    7.493     6.887     0.000     7.501
+  overlap/reuse   B        5.477      4.784      1.554    3.054     7.037     0.000     4.312
+
+--- staging arena, per configuration (A+B) ---
+  serial/churn    real allocs 12  pool hits  0  pin  73.881 ms  unpin  42.351 ms
+  serial/reuse    real allocs  2  pool hits 14  pin  12.379 ms  unpin   0.000 ms
+  overlap/reuse   real allocs  9  pool hits 11  pin  13.923 ms  unpin   0.000 ms
+  totals        A+B    135.453                                                                <- serial/churn
+  totals        A+B     18.011                                                                <- serial/reuse (7.52x vs churn)
+  totals        A+B     14.896                                                                <- overlap/reuse (9.09x vs churn)
+  resident compute (PART 1, whole bank on device): 6.867 ms
+  overlap/reuse total vs resident compute: 2.17x
+
+--- transport (config 2, both passes) ---
+  NVMe reads               12  (24477696 bytes = 23.344 MiB)
+  reader thread busy       3.817 ms  (pure fread time, queue waits excluded)
+  H2D copies               12  (24477696 bytes), submit->DONE latency 10.547 ms
+  pin/unpin (host arena)   13.923 / 0.000 ms, real allocs 9, pool hits 11
+  staging pool at pass end 9 buffer(s), released by drain() (allocs == frees CHECKed)
+  C8 slot acquires         12  (releases 12, uses 12, peak 2/2)
+  C8 event-gated evictions 12  (retire waited on a use event)
+  C8 own event-gate hits   yes  (allocator saw an unfired use event)
+  C9 transitions           84  (C21 events 84, into VRAM 12)
+  C9 deadline misses       0  -- VACUOUS HERE: demand_deadline_ticks=1000000,
+                           so no miss is reachable; the deadline path is NOT exercised.
+  C19 fallback hand-offs   0
+  NVMe write attempts      0 issued, 0 refused (reads beat writes)
+
+--- rates (config 2) ---
+  FLOPs                    19.327 GFLOP for 512 tokens (1024 pairs, top-2)
+  effective                   1.30 TFLOP/s  (compute+transport bound)
+  achieved transfer          23.34 MiB / 14.896 ms = 1.64 GiB/s (read+H2D)
+  VRAM footprint           4.922 MiB vs 23.344 MiB resident (21.1%)
+
+=== Summary ===
+  streamed == resident (bit-for-bit, all 3 configurations): yes
+  activation bits identical across configurations: yes
+  streamed layer-0 FFN, overlap/reuse: 14.896 ms (resident compute 6.867 ms,
+    serial/churn 135.453 ms, serial/reuse 18.011 ms)
+  checks failed: 0
+
+RESULT: PASS
+########################## RUN 2 ##########################
+=== q4k_stream_ffn -- C9 residency + C8 slots + C11 transfers ===
+device      AMD Radeon RX 9070 XT (gfx1201)
+cu          32   wave 32   threads/block 64
+layer       0   hidden=1024 ff=3072 experts=4 topk=2
+tokens      512   pairs=1024
+slab bytes  gate=1769472 up=1769472 down=2580480 (per expert)
+routing     e0=254 e1=256 e2=253 e3=261 
+
+--- PART 1: resident (whole bank on device) ---
+
+--- PART 2: streamed (C9 residency, 2 slot(s) of 2.46 MiB) ---
+slot pool   2 x 2.461 MiB = 4.922 MiB   (bank would be 23.344 MiB)
+  configs:
+    0 serial/churn   1 work item in flight, staging allocated per read
+    1 serial/reuse   same, staging pooled and reused (C7 bounce buffers)
+    2 overlap/reuse  2 items in flight, demand runs 2 ahead of compute
+
+--- PART 3: bit-for-bit streamed vs resident (I1) ---
+  gate (Q4_K) serial/churn       bytes-identical=yes  differing=0
+  up   (Q4_K) serial/churn       bytes-identical=yes  differing=0
+  down (Q6_K) serial/churn       bytes-identical=yes  differing=0
+  gate (Q4_K) serial/reuse       bytes-identical=yes  differing=0
+  up   (Q4_K) serial/reuse       bytes-identical=yes  differing=0
+  down (Q6_K) serial/reuse       bytes-identical=yes  differing=0
+  gate (Q4_K) overlap/reuse      bytes-identical=yes  differing=0
+  up   (Q4_K) overlap/reuse      bytes-identical=yes  differing=0
+  down (Q6_K) overlap/reuse      bytes-identical=yes  differing=0
+
+--- streamed down vs verified gguf-py decode (Q6_K) ---
+  down (streamed, Q6_K)    rows=1024   worst-row-rel=1.062e-05  worst-abs=8.169e-05  unwritten=0  rows-over-tol=0
+
+--- streamed layer output (weighted top-k sum) ---
+  layer0 MoE FFN out       rows=512    worst-row-rel=5.774e-08  worst-abs=4.165e-07  unwritten=0  rows-over-tol=0
+
+--- PART 4: where the wall time went (MEASURED) ---
+  config          pass      wall     stream  nvme-read      h2d       pin     unpin      wait
+  serial/churn    A       93.967     88.354      2.347    2.865    52.275    28.885    38.349
+  serial/churn    B       49.329     41.383      1.563    1.666    28.283    13.945    18.966
+  serial/reuse    A       11.473     11.317      2.130    2.690     7.491     0.000     8.489
+  serial/reuse    B        6.894      6.187      1.543    1.388     6.996     0.000     4.681
+  overlap/reuse   A        9.055      8.465      2.008    7.168     7.370     0.000     7.267
+  overlap/reuse   B        5.456      4.672      1.711    3.159     7.147     0.000     4.298
+
+--- staging arena, per configuration (A+B) ---
+  serial/churn    real allocs 12  pool hits  0  pin  80.557 ms  unpin  42.830 ms
+  serial/reuse    real allocs  2  pool hits 14  pin  14.488 ms  unpin   0.000 ms
+  overlap/reuse   real allocs  9  pool hits 11  pin  14.517 ms  unpin   0.000 ms
+  totals        A+B    143.296                                                                <- serial/churn
+  totals        A+B     18.366                                                                <- serial/reuse (7.80x vs churn)
+  totals        A+B     14.510                                                                <- overlap/reuse (9.88x vs churn)
+  resident compute (PART 1, whole bank on device): 6.877 ms
+  overlap/reuse total vs resident compute: 2.11x
+
+--- transport (config 2, both passes) ---
+  NVMe reads               12  (24477696 bytes = 23.344 MiB)
+  reader thread busy       3.719 ms  (pure fread time, queue waits excluded)
+  H2D copies               12  (24477696 bytes), submit->DONE latency 10.327 ms
+  pin/unpin (host arena)   14.517 / 0.000 ms, real allocs 9, pool hits 11
+  staging pool at pass end 9 buffer(s), released by drain() (allocs == frees CHECKed)
+  C8 slot acquires         12  (releases 12, uses 12, peak 2/2)
+  C8 event-gated evictions 12  (retire waited on a use event)
+  C8 own event-gate hits   yes  (allocator saw an unfired use event)
+  C9 transitions           84  (C21 events 84, into VRAM 12)
+  C9 deadline misses       0  -- VACUOUS HERE: demand_deadline_ticks=1000000,
+                           so no miss is reachable; the deadline path is NOT exercised.
+  C19 fallback hand-offs   0
+  NVMe write attempts      0 issued, 0 refused (reads beat writes)
+
+--- rates (config 2) ---
+  FLOPs                    19.327 GFLOP for 512 tokens (1024 pairs, top-2)
+  effective                   1.33 TFLOP/s  (compute+transport bound)
+  achieved transfer          23.34 MiB / 14.510 ms = 1.69 GiB/s (read+H2D)
+  VRAM footprint           4.922 MiB vs 23.344 MiB resident (21.1%)
+
+=== Summary ===
+  streamed == resident (bit-for-bit, all 3 configurations): yes
+  activation bits identical across configurations: yes
+  streamed layer-0 FFN, overlap/reuse: 14.510 ms (resident compute 6.877 ms,
+    serial/churn 143.296 ms, serial/reuse 18.366 ms)
+  checks failed: 0
+
+RESULT: PASS
+########################## RUN 3 ##########################
+=== q4k_stream_ffn -- C9 residency + C8 slots + C11 transfers ===
+device      AMD Radeon RX 9070 XT (gfx1201)
+cu          32   wave 32   threads/block 64
+layer       0   hidden=1024 ff=3072 experts=4 topk=2
+tokens      512   pairs=1024
+slab bytes  gate=1769472 up=1769472 down=2580480 (per expert)
+routing     e0=254 e1=256 e2=253 e3=261 
+
+--- PART 1: resident (whole bank on device) ---
+
+--- PART 2: streamed (C9 residency, 2 slot(s) of 2.46 MiB) ---
+slot pool   2 x 2.461 MiB = 4.922 MiB   (bank would be 23.344 MiB)
+  configs:
+    0 serial/churn   1 work item in flight, staging allocated per read
+    1 serial/reuse   same, staging pooled and reused (C7 bounce buffers)
+    2 overlap/reuse  2 items in flight, demand runs 2 ahead of compute
+
+--- PART 3: bit-for-bit streamed vs resident (I1) ---
+  gate (Q4_K) serial/churn       bytes-identical=yes  differing=0
+  up   (Q4_K) serial/churn       bytes-identical=yes  differing=0
+  down (Q6_K) serial/churn       bytes-identical=yes  differing=0
+  gate (Q4_K) serial/reuse       bytes-identical=yes  differing=0
+  up   (Q4_K) serial/reuse       bytes-identical=yes  differing=0
+  down (Q6_K) serial/reuse       bytes-identical=yes  differing=0
+  gate (Q4_K) overlap/reuse      bytes-identical=yes  differing=0
+  up   (Q4_K) overlap/reuse      bytes-identical=yes  differing=0
+  down (Q6_K) overlap/reuse      bytes-identical=yes  differing=0
+
+--- streamed down vs verified gguf-py decode (Q6_K) ---
+  down (streamed, Q6_K)    rows=1024   worst-row-rel=1.062e-05  worst-abs=8.169e-05  unwritten=0  rows-over-tol=0
+
+--- streamed layer output (weighted top-k sum) ---
+  layer0 MoE FFN out       rows=512    worst-row-rel=5.774e-08  worst-abs=4.165e-07  unwritten=0  rows-over-tol=0
+
+--- PART 4: where the wall time went (MEASURED) ---
+  config          pass      wall     stream  nvme-read      h2d       pin     unpin      wait
+  serial/churn    A       82.055     77.292      2.278    2.801    43.130    26.918    35.854
+  serial/churn    B       49.141     41.318      1.729    1.543    27.839    14.187    19.227
+  serial/reuse    A       10.473      9.949      1.747    2.338     7.181     0.000     7.809
+  serial/reuse    B        6.371      5.718      1.423    1.266     7.003     0.000     4.536
+  overlap/reuse   A        9.033      8.465      2.402    7.178     6.920     0.000     7.268
+  overlap/reuse   B        5.151      4.383      1.573    3.574     7.234     0.000     4.029
+
+--- staging arena, per configuration (A+B) ---
+  serial/churn    real allocs 12  pool hits  0  pin  70.969 ms  unpin  41.105 ms
+  serial/reuse    real allocs  2  pool hits 14  pin  14.184 ms  unpin   0.000 ms
+  overlap/reuse   real allocs  9  pool hits 11  pin  14.154 ms  unpin   0.000 ms
+  totals        A+B    131.196                                                                <- serial/churn
+  totals        A+B     16.844                                                                <- serial/reuse (7.79x vs churn)
+  totals        A+B     14.183                                                                <- overlap/reuse (9.25x vs churn)
+  resident compute (PART 1, whole bank on device): 6.772 ms
+  overlap/reuse total vs resident compute: 2.09x
+
+--- transport (config 2, both passes) ---
+  NVMe reads               12  (24477696 bytes = 23.344 MiB)
+  reader thread busy       3.975 ms  (pure fread time, queue waits excluded)
+  H2D copies               12  (24477696 bytes), submit->DONE latency 10.752 ms
+  pin/unpin (host arena)   14.154 / 0.000 ms, real allocs 9, pool hits 11
+  staging pool at pass end 9 buffer(s), released by drain() (allocs == frees CHECKed)
+  C8 slot acquires         12  (releases 12, uses 12, peak 2/2)
+  C8 event-gated evictions 12  (retire waited on a use event)
+  C8 own event-gate hits   yes  (allocator saw an unfired use event)
+  C9 transitions           84  (C21 events 84, into VRAM 12)
+  C9 deadline misses       0  -- VACUOUS HERE: demand_deadline_ticks=1000000,
+                           so no miss is reachable; the deadline path is NOT exercised.
+  C19 fallback hand-offs   0
+  NVMe write attempts      0 issued, 0 refused (reads beat writes)
+
+--- rates (config 2) ---
+  FLOPs                    19.327 GFLOP for 512 tokens (1024 pairs, top-2)
+  effective                   1.36 TFLOP/s  (compute+transport bound)
+  achieved transfer          23.34 MiB / 14.183 ms = 1.73 GiB/s (read+H2D)
+  VRAM footprint           4.922 MiB vs 23.344 MiB resident (21.1%)
+
+=== Summary ===
+  streamed == resident (bit-for-bit, all 3 configurations): yes
+  activation bits identical across configurations: yes
+  streamed layer-0 FFN, overlap/reuse: 14.183 ms (resident compute 6.772 ms,
+    serial/churn 131.196 ms, serial/reuse 16.844 ms)
+  checks failed: 0
+
+RESULT: PASS

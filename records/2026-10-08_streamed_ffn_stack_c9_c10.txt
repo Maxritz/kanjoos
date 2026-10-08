@@ -1,0 +1,217 @@
+=== q4k_stream_ffn -- whole stack: C9 + C8 + C11 + C10 prefetch + C9 deadline ===
+device      AMD Radeon RX 9070 XT (gfx1201)
+layers      28 of 28   hidden=1024 ff=3072 experts=4 topk=2
+tokens      512   pairs=1024/layer   slots main=2 pf=16 x 2.461 MiB
+down decode mix: 14 layer(s) Q4_K, 14 layer(s) Q6_K
+bank upload 653.625 MiB in 0.256 s (setup, excluded from every wall clock)
+
+--- PART 1: resident stack (the reference) ---
+  device 202.646 ms (7.237 ms/layer), host-critical 1212.032 ms (43.287 ms/layer)
+  per-layer device ms: 9.69 9.55 9.83 9.10 6.42 6.48 6.23 7.97 6.49 6.10 6.19 6.48 8.03 8.43 9.51 6.18 6.14 6.41 6.19 6.23 6.39 6.37 6.26 6.62 6.54 6.36 9.38 7.08
+
+--- resident down L0 vs verified gguf-py decode (Q6_K) ---
+  down (resident L0, Q6_K) rows=1024   worst-row-rel=1.062e-05  worst-abs=8.169e-05  unwritten=0  rows-over-tol=0
+slot pools   main 2 x 2.461 MiB, pf 16 x 2.461 MiB
+
+--- PART 2: streamed whole stack ---
+slot-bytes probe L0 e0 r0: match (first 8: 45 0f 80 1a ea d5 5b ac / 45 0f 80 1a ea d5 5b ac)
+
+--- pass M0 serial/churn ---
+  wall 5142.221 ms   host-critical 921.340 ms   per-layer wall ms: 199.20 195.75 197.37 233.86 220.55 168.51 164.33 160.28 205.68 157.81 160.46 163.96 167.65 191.29 161.25 170.66 168.95 217.12 164.31 165.39 204.54 158.14 160.94 165.72 199.21 156.54 182.53 161.47
+  reads 336 (610.312 MiB, reader busy 147.928 ms)  h2d 336 (120.853 ms)  pin 2257.611 ms
+  C8: acq 336 rel 336 peak 1/2 gated-evict 336  |  C9: trans 2352 into-VRAM 336
+  C21: misses 0  C19: hand-offs 0  preempted-prefetch 0 refused-demote 0
+  arena: allocs 336 hits 0 staged-at-end 0  |  pf: reads 0 landed 0 wasted 0 (0.000 MiB)
+  prefetch hit rate at demand: 324/324 = 100.0%
+  bits vs resident: identical   carried-state chain: identical
+  waits: 336 item(s), total 140993 tick(s), max 966, mean 419.6, p50 385, p90 564, wall 0.000 ms
+slot-bytes probe L0 e0 r0: match (first 8: 45 0f 80 1a ea d5 5b ac / 45 0f 80 1a ea d5 5b ac)
+
+--- pass M1 serial/reuse ---
+  wall 1504.417 ms   host-critical 884.919 ms   per-layer wall ms: 77.91 78.12 73.44 79.03 103.25 48.60 39.99 40.34 46.25 57.38 40.32 40.19 39.99 38.50 39.65 39.31 38.84 44.10 39.61 39.80 46.52 39.45 39.84 41.01 41.21 44.24 41.65 46.99
+  reads 336 (610.312 MiB, reader busy 102.337 ms)  h2d 336 (104.914 ms)  pin 6.848 ms
+  C8: acq 336 rel 336 peak 1/2 gated-evict 336  |  C9: trans 2352 into-VRAM 336
+  C21: misses 0  C19: hand-offs 0  preempted-prefetch 0 refused-demote 0
+  arena: allocs 2 hits 336 staged-at-end 2  |  pf: reads 0 landed 0 wasted 0 (0.000 MiB)
+  prefetch hit rate at demand: 324/324 = 100.0%
+  bits vs resident: identical   carried-state chain: identical
+  waits: 336 item(s), total 164548 tick(s), max 2390, mean 489.7, p50 441, p90 663, wall 0.000 ms
+slot-bytes probe L0 e0 r0: match (first 8: 45 0f 80 1a ea d5 5b ac / 45 0f 80 1a ea d5 5b ac)
+
+--- pass M2 overlap/reuse ---
+  wall 1368.172 ms   host-critical 872.151 ms   per-layer wall ms: 72.28 69.49 69.21 78.40 99.25 46.88 39.99 35.68 38.54 38.79 39.61 36.52 36.15 35.48 37.65 36.11 36.03 37.30 35.89 36.11 35.74 36.86 35.47 36.28 35.81 36.55 36.28 38.66
+  reads 336 (610.312 MiB, reader busy 104.279 ms)  h2d 336 (335.999 ms)  pin 6.866 ms
+  C8: acq 336 rel 336 peak 2/2 gated-evict 336  |  C9: trans 2352 into-VRAM 336
+  C21: misses 0  C19: hand-offs 0  preempted-prefetch 0 refused-demote 0
+  arena: allocs 8 hits 332 staged-at-end 8  |  pf: reads 0 landed 0 wasted 0 (0.000 MiB)
+  prefetch hit rate at demand: 324/324 = 100.0%
+  bits vs resident: identical   carried-state chain: identical
+  waits: 336 item(s), total 245740 tick(s), max 2615, mean 731.4, p50 720, p90 1254, wall 0.000 ms
+slot-bytes probe L0 e0 r0: match (first 8: 45 0f 80 1a ea d5 5b ac / 45 0f 80 1a ea d5 5b ac)
+
+--- pass M3 overlap/split-copy ---
+  wall 1328.067 ms   host-critical 892.520 ms   per-layer wall ms: 68.82 68.60 67.41 73.19 94.56 43.76 34.84 34.02 34.10 36.91 40.39 35.83 47.91 44.56 34.97 33.97 34.03 34.94 33.43 34.50 34.52 33.94 34.15 33.88 34.04 37.30 34.27 35.78
+  reads 336 (610.312 MiB, reader busy 124.452 ms)  h2d 336 (98.370 ms)  pin 7.630 ms
+  C8: acq 336 rel 336 peak 2/2 gated-evict 336  |  C9: trans 2352 into-VRAM 336
+  C21: misses 0  C19: hand-offs 0  preempted-prefetch 0 refused-demote 0
+  arena: allocs 9 hits 331 staged-at-end 9  |  pf: reads 0 landed 0 wasted 0 (0.000 MiB)
+  prefetch hit rate at demand: 324/324 = 100.0%
+  bits vs resident: identical   carried-state chain: identical
+  waits: 336 item(s), total 188454 tick(s), max 2220, mean 560.9, p50 433, p90 998, wall 0.000 ms
+
+--- PART 3: C10 prefetch horizon sweep (16-slot capacity point) ---
+slot-bytes probe L0 e0 r0: match (first 8: 45 0f 80 1a ea d5 5b ac / 45 0f 80 1a ea d5 5b ac)
+
+--- pass P0 overlap control ---
+  wall 1373.667 ms   host-critical 881.590 ms   per-layer wall ms: 70.53 69.82 68.65 74.99 94.11 43.35 36.65 35.97 36.21 35.92 36.05 36.10 35.58 39.10 37.81 35.66 38.31 42.75 36.14 36.05 41.24 35.82 38.51 46.55 42.91 36.53 35.90 37.60
+  reads 336 (610.312 MiB, reader busy 110.360 ms)  h2d 336 (329.103 ms)  pin 12.739 ms
+  C8: acq 336 rel 336 peak 2/16 gated-evict 336  |  C9: trans 2352 into-VRAM 336
+  C21: misses 0  C19: hand-offs 0  preempted-prefetch 0 refused-demote 0
+  arena: allocs 26 hits 328 staged-at-end 26  |  pf: reads 0 landed 0 wasted 0 (0.000 MiB)
+  prefetch hit rate at demand: 324/324 = 100.0%
+  bits vs resident: identical   carried-state chain: identical
+  waits: 336 item(s), total 232789 tick(s), max 2637, mean 692.8, p50 643, p90 1221, wall 0.000 ms
+slot-bytes probe L0 e0 r0: match (first 8: 45 0f 80 1a ea d5 5b ac / 45 0f 80 1a ea d5 5b ac)
+
+--- pass P1 true-set lead 1 ---
+  wall 1396.993 ms   host-critical 891.298 ms   per-layer wall ms: 78.79 72.86 72.93 76.10 96.93 43.69 36.84 36.01 35.81 35.39 36.59 41.95 41.26 42.05 36.69 35.74 36.48 48.75 46.69 35.96 35.85 36.15 35.04 35.67 35.95 35.98 36.16 37.64
+  reads 336 (610.312 MiB, reader busy 115.434 ms)  h2d 336 (338.468 ms)  pin 13.969 ms
+  C8: acq 336 rel 336 peak 2/16 gated-evict 336  |  C9: trans 2352 into-VRAM 336
+  C21: misses 0  C19: hand-offs 0  preempted-prefetch 0 refused-demote 0
+  arena: allocs 33 hits 321 staged-at-end 33  |  pf: reads 220 landed 0 wasted 0 (0.000 MiB)
+  prefetch hit rate at demand: 324/324 = 100.0%
+  bits vs resident: identical   carried-state chain: identical
+  waits: 336 item(s), total 242173 tick(s), max 3578, mean 720.8, p50 718, p90 1253, wall 0.000 ms
+slot-bytes probe L0 e0 r0: match (first 8: 45 0f 80 1a ea d5 5b ac / 45 0f 80 1a ea d5 5b ac)
+
+--- pass P2 true-set lead 2 ---
+  wall 1389.526 ms   host-critical 876.496 ms   per-layer wall ms: 87.00 70.08 69.48 76.01 95.50 44.01 36.45 35.96 36.55 35.40 35.98 35.93 35.35 35.45 36.43 39.43 39.16 36.40 40.39 36.33 36.15 34.84 39.09 49.52 36.84 37.31 36.95 40.58
+  reads 336 (610.312 MiB, reader busy 111.481 ms)  h2d 336 (337.154 ms)  pin 21.869 ms
+  C8: acq 336 rel 336 peak 2/16 gated-evict 336  |  C9: trans 2352 into-VRAM 336
+  C21: misses 0  C19: hand-offs 0  preempted-prefetch 0 refused-demote 0
+  arena: allocs 46 hits 308 staged-at-end 46  |  pf: reads 324 landed 0 wasted 0 (0.000 MiB)
+  prefetch hit rate at demand: 324/324 = 100.0%
+  bits vs resident: identical   carried-state chain: identical
+  waits: 336 item(s), total 229448 tick(s), max 2605, mean 682.9, p50 646, p90 1218, wall 0.000 ms
+slot-bytes probe L0 e0 r0: match (first 8: 45 0f 80 1a ea d5 5b ac / 45 0f 80 1a ea d5 5b ac)
+
+--- pass P4 true-set lead 4 ---
+  wall 1448.392 ms   host-critical 872.969 ms   per-layer wall ms: 119.12 68.74 70.24 77.30 97.04 45.09 35.90 38.23 40.65 38.92 39.98 36.09 35.30 38.00 48.55 39.12 34.94 35.15 34.77 36.45 40.81 42.81 42.95 36.09 35.80 35.76 38.99 47.32
+  reads 336 (610.312 MiB, reader busy 134.206 ms)  h2d 336 (376.406 ms)  pin 40.912 ms
+  C8: acq 336 rel 336 peak 2/16 gated-evict 336  |  C9: trans 2352 into-VRAM 336
+  C21: misses 0  C19: hand-offs 0  preempted-prefetch 0 refused-demote 0
+  arena: allocs 76 hits 278 staged-at-end 76  |  pf: reads 324 landed 0 wasted 0 (0.000 MiB)
+  prefetch hit rate at demand: 324/324 = 100.0%
+  bits vs resident: identical   carried-state chain: identical
+  waits: 336 item(s), total 258463 tick(s), max 4323, mean 769.2, p50 630, p90 1447, wall 0.000 ms
+slot-bytes probe L0 e0 r0: match (first 8: 45 0f 80 1a ea d5 5b ac / 45 0f 80 1a ea d5 5b ac)
+
+--- pass C1 carry-forward lead 1 ---
+  wall 1393.130 ms   host-critical 876.600 ms   per-layer wall ms: 78.63 70.08 70.72 75.74 98.96 45.71 35.46 39.70 46.30 35.45 39.06 36.60 35.36 35.20 35.31 34.79 37.89 40.59 38.78 40.94 40.41 41.56 35.97 36.06 37.41 36.74 35.29 36.93
+  reads 336 (610.312 MiB, reader busy 111.400 ms)  h2d 336 (348.793 ms)  pin 13.627 ms
+  C8: acq 336 rel 336 peak 2/16 gated-evict 336  |  C9: trans 2352 into-VRAM 336
+  C21: misses 0  C19: hand-offs 0  preempted-prefetch 0 refused-demote 0
+  arena: allocs 33 hits 321 staged-at-end 33  |  pf: reads 220 landed 0 wasted 0 (0.000 MiB)
+  prefetch hit rate at demand: 324/324 = 100.0%
+  bits vs resident: identical   carried-state chain: identical
+  waits: 336 item(s), total 249714 tick(s), max 2627, mean 743.2, p50 699, p90 1269, wall 0.000 ms
+  carry-forward expert-set overlap (L-1 -> L): 64/108 = 59.3%
+
+--- PART 4: C9 deadline path (T=64, 4 layers, cold start) ---
+
+--- pass 4a: hand-offs=24 deadline=0 (C19, no wait) ---
+  wall 64547.793 ms  host-fallback compute 64475.744 ms  hand-offs 48  C21 misses 0
+  deadline down L0         rows=128    worst-row-rel=6.064e-04  worst-abs=3.377e-03  unwritten=0  rows-over-tol=0
+  deadline layer out L0    rows=64     worst-row-rel=6.064e-04  worst-abs=3.377e-03  unwritten=0  rows-over-tol=0
+  deadline down L1         rows=128    worst-row-rel=9.727e-05  worst-abs=9.694e-04  unwritten=0  rows-over-tol=0
+  deadline layer out L1    rows=64     worst-row-rel=9.727e-05  worst-abs=9.694e-04  unwritten=0  rows-over-tol=0
+  deadline down L2         rows=128    worst-row-rel=1.762e-04  worst-abs=8.594e-02  unwritten=0  rows-over-tol=0
+  deadline layer out L2    rows=64     worst-row-rel=6.371e-05  worst-abs=8.594e-02  unwritten=0  rows-over-tol=0
+  deadline down L3         rows=128    worst-row-rel=1.522e-04  worst-abs=6.660e-01  unwritten=0  rows-over-tol=0
+  deadline layer out L3    rows=64     worst-row-rel=8.194e-05  worst-abs=3.218e-01  unwritten=0  rows-over-tol=0
+
+--- pass deadline=0 (no-wait fb) ---
+  wall 64547.793 ms   host-critical 34.971 ms   per-layer wall ms: 15843.49 15885.84 15913.59 16892.30
+  reads 48 (90.281 MiB, reader busy 21.309 ms)  h2d 2 (9.296 ms)  pin 13.941 ms
+  C8: acq 2 rel 2 peak 2/2 gated-evict 0  |  C9: trans 152 into-VRAM 2
+  C21: misses 0  C19: hand-offs 48  preempted-prefetch 0 refused-demote 0
+  arena: allocs 48 hits 0 staged-at-end 0  |  pf: reads 0 landed 0 wasted 0 (0.000 MiB)
+  bits vs resident: identical   carried-state chain: identical
+  waits: none (0 items waited)
+slot-bytes probe L0 e0 r0: match (first 8: 45 0f 80 1a ea d5 5b ac / 45 0f 80 1a ea d5 5b ac)
+
+--- pass 4b: wait sweep deadline=0 ticks ---
+  wall 613.838 ms  hand-offs 0  C21 misses 48
+  waitsweep down L0        rows=128    worst-row-rel=0.000e+00  worst-abs=0.000e+00  unwritten=0  rows-over-tol=0
+  waitsweep down L1        rows=128    worst-row-rel=0.000e+00  worst-abs=0.000e+00  unwritten=0  rows-over-tol=0
+  waitsweep down L2        rows=128    worst-row-rel=0.000e+00  worst-abs=0.000e+00  unwritten=0  rows-over-tol=0
+  waitsweep down L3        rows=128    worst-row-rel=0.000e+00  worst-abs=0.000e+00  unwritten=0  rows-over-tol=0
+
+--- pass wait sweep ---
+  wall 613.838 ms   host-critical 32.610 ms   per-layer wall ms: 147.89 143.68 142.56 176.12
+  reads 48 (90.281 MiB, reader busy 19.942 ms)  h2d 48 (16.506 ms)  pin 334.633 ms
+  C8: acq 48 rel 48 peak 2/2 gated-evict 48  |  C9: trans 336 into-VRAM 48
+  C21: misses 48  C19: hand-offs 0  preempted-prefetch 0 refused-demote 0
+  arena: allocs 48 hits 0 staged-at-end 0  |  pf: reads 0 landed 0 wasted 0 (0.000 MiB)
+  prefetch hit rate at demand: 36/36 = 100.0%
+  bits vs resident: identical   carried-state chain: identical
+  waits: 48 item(s), total 104257 tick(s), max 4183, mean 2172.0, p50 2048, p90 3065, wall 37.978 ms
+slot-bytes probe L0 e0 r0: match (first 8: 45 0f 80 1a ea d5 5b ac / 45 0f 80 1a ea d5 5b ac)
+
+--- pass 4b: wait sweep deadline=25 ticks ---
+  wall 575.523 ms  hand-offs 0  C21 misses 48
+  waitsweep down L0        rows=128    worst-row-rel=0.000e+00  worst-abs=0.000e+00  unwritten=0  rows-over-tol=0
+  waitsweep down L1        rows=128    worst-row-rel=0.000e+00  worst-abs=0.000e+00  unwritten=0  rows-over-tol=0
+  waitsweep down L2        rows=128    worst-row-rel=0.000e+00  worst-abs=0.000e+00  unwritten=0  rows-over-tol=0
+  waitsweep down L3        rows=128    worst-row-rel=0.000e+00  worst-abs=0.000e+00  unwritten=0  rows-over-tol=0
+
+--- pass wait sweep ---
+  wall 575.523 ms   host-critical 33.108 ms   per-layer wall ms: 145.61 139.46 144.78 141.91
+  reads 48 (90.281 MiB, reader busy 18.661 ms)  h2d 48 (15.195 ms)  pin 316.222 ms
+  C8: acq 48 rel 48 peak 2/2 gated-evict 48  |  C9: trans 336 into-VRAM 48
+  C21: misses 48  C19: hand-offs 0  preempted-prefetch 0 refused-demote 0
+  arena: allocs 48 hits 0 staged-at-end 0  |  pf: reads 0 landed 0 wasted 0 (0.000 MiB)
+  prefetch hit rate at demand: 36/36 = 100.0%
+  bits vs resident: identical   carried-state chain: identical
+  waits: 48 item(s), total 94945 tick(s), max 3214, mean 1978.0, p50 1923, p90 2432, wall 34.994 ms
+slot-bytes probe L0 e0 r0: match (first 8: 45 0f 80 1a ea d5 5b ac / 45 0f 80 1a ea d5 5b ac)
+
+--- pass 4b: wait sweep deadline=200 ticks ---
+  wall 605.939 ms  hand-offs 0  C21 misses 48
+  waitsweep down L0        rows=128    worst-row-rel=0.000e+00  worst-abs=0.000e+00  unwritten=0  rows-over-tol=0
+  waitsweep down L1        rows=128    worst-row-rel=0.000e+00  worst-abs=0.000e+00  unwritten=0  rows-over-tol=0
+  waitsweep down L2        rows=128    worst-row-rel=0.000e+00  worst-abs=0.000e+00  unwritten=0  rows-over-tol=0
+  waitsweep down L3        rows=128    worst-row-rel=0.000e+00  worst-abs=0.000e+00  unwritten=0  rows-over-tol=0
+
+--- pass wait sweep ---
+  wall 605.939 ms   host-critical 32.749 ms   per-layer wall ms: 143.28 162.25 158.07 138.63
+  reads 48 (90.281 MiB, reader busy 20.487 ms)  h2d 48 (16.265 ms)  pin 331.841 ms
+  C8: acq 48 rel 48 peak 2/2 gated-evict 48  |  C9: trans 336 into-VRAM 48
+  C21: misses 48  C19: hand-offs 0  preempted-prefetch 0 refused-demote 0
+  arena: allocs 48 hits 0 staged-at-end 0  |  pf: reads 0 landed 0 wasted 0 (0.000 MiB)
+  prefetch hit rate at demand: 36/36 = 100.0%
+  bits vs resident: identical   carried-state chain: identical
+  waits: 48 item(s), total 102184 tick(s), max 5085, mean 2128.8, p50 1821, p90 3044, wall 38.262 ms
+slot-bytes probe L0 e0 r0: match (first 8: 45 0f 80 1a ea d5 5b ac / 45 0f 80 1a ea d5 5b ac)
+
+--- pass 4b: wait sweep deadline=5000 ticks ---
+  wall 607.007 ms  hand-offs 0  C21 misses 0
+  waitsweep down L0        rows=128    worst-row-rel=0.000e+00  worst-abs=0.000e+00  unwritten=0  rows-over-tol=0
+  waitsweep down L1        rows=128    worst-row-rel=0.000e+00  worst-abs=0.000e+00  unwritten=0  rows-over-tol=0
+  waitsweep down L2        rows=128    worst-row-rel=0.000e+00  worst-abs=0.000e+00  unwritten=0  rows-over-tol=0
+  waitsweep down L3        rows=128    worst-row-rel=0.000e+00  worst-abs=0.000e+00  unwritten=0  rows-over-tol=0
+
+--- pass wait sweep ---
+  wall 607.007 ms   host-critical 33.398 ms   per-layer wall ms: 148.03 140.28 147.97 166.42
+  reads 48 (90.281 MiB, reader busy 19.874 ms)  h2d 48 (16.988 ms)  pin 329.912 ms
+  C8: acq 48 rel 48 peak 2/2 gated-evict 48  |  C9: trans 336 into-VRAM 48
+  C21: misses 0  C19: hand-offs 0  preempted-prefetch 0 refused-demote 0
+  arena: allocs 48 hits 0 staged-at-end 0  |  pf: reads 0 landed 0 wasted 0 (0.000 MiB)
+  prefetch hit rate at demand: 36/36 = 100.0%
+  bits vs resident: identical   carried-state chain: identical
+  waits: 48 item(s), total 100512 tick(s), max 3857, mean 2094.0, p50 1949, p90 2789, wall 38.107 ms
+
+=== Summary ===
+  checks failed: 0
+
+RESULT: PASS
