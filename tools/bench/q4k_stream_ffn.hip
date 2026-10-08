@@ -3,6 +3,8 @@
 // bounded VRAM slot pool, driven by the real C9 residency manager with a real
 // C8 slot allocator and a real C11 transfer engine.
 //
+// KNJ_BENCH_REQUIRES: a job file naming an external GGUF and a dump directory (argv: <job> <dumpdir> [tokens] [slots] [pf_slots] [max_layers]). The gate passes no arguments, so this driver is reported NOT RUN rather than failed on a usage error.
+//
 // WHAT PROBLEM THIS SOLVES
 // ------------------------
 // Everything the project has measured runs on FULLY RESIDENT weights. The whole
@@ -54,7 +56,7 @@
 //         --offload-arch=gfx1201 -Xclang -target-feature \
 //         -Xclang +wavefrontsize32 -I tools/bench -I kernels -I . \
 //         tools/bench/q4k_stream_ffn.hip src/residency/residency.cpp \
-//         -o build/q4k/q4k_stream_ffn.exe
+//         src/platform/memprobe.cpp -o build/q4k/q4k_stream_ffn.exe
 // Run (arch-guarded: exits 7 unconfigured, 6 arch-mismatched):
 //   KNJ_BUILD_ARCH=gfx1201 build/q4k/q4k_stream_ffn.exe <job> <dumpdir> [tokens] [slots]
 //
@@ -84,6 +86,7 @@
 #include "knj_wmma_guard.h"
 #include "knj_q4k.h"
 
+#include "src/platform/memprobe.h"
 #include "src/residency/residency.h"
 
 #define HIPCHECK(x)                                                            \
@@ -175,6 +178,39 @@ static uint64_t mono_ns() {
                steady_clock::now().time_since_epoch()).count();
 }
 static uint64_t now_ns() { return mono_ns(); }
+
+// ===========================================================================
+// C21/C24 machine telemetry -- RAM, VRAM and CPU utilisation for the record
+// ===========================================================================
+// `docs/06-profiling.md` specifies the C21 profiler and `kanjoos serve
+// --profiling ...`; the CLI has none of it yet, so this is its smallest honest
+// form, captured into the transcript of every run.
+//
+// What each number is, and what it is NOT:
+//   * VRAM used = total - free from `hipMemGetInfo`. That is DEVICE-WIDE -- it
+//     includes the desktop compositor and any other process -- so every line
+//     that quotes it says so. It is never presented as this driver's footprint.
+//   * RAM lines are THIS process's own (RSS, peak RSS, private commit) plus the
+//     machine's total and available, from `src/platform/memprobe.h` (C24).
+//   * CPU is this process's own user+sys time over the run window, and the
+//     host-wide busy fraction from the same window over all logical cpus.
+//   * GPU utilisation is NOT reported. No HIP API exposes it on this stack; the
+//     `amdsmi`/`rocm-smi` route would add a dependency this driver does not
+//     need. Device busy attribution comes from the driver's own kernel/H2D
+//     timers, which sit on one clock with everything else printed here.
+struct DevMem {
+    uint64_t free_bytes = 0, total_bytes = 0;
+    uint64_t used() const { return total_bytes > free_bytes ? total_bytes - free_bytes : 0; }
+};
+static DevMem dev_mem() {
+    DevMem d;
+    size_t f = 0, t = 0;
+    if (hipMemGetInfo(&f, &t) == hipSuccess) { d.free_bytes = f; d.total_bytes = t; }
+    return d;
+}
+static void print_mib(const char *label, uint64_t bytes) {
+    printf("  %-34s %10.1f MiB\n", label, (double)bytes / 1048576.0);
+}
 
 // ===========================================================================
 // C8 -- HipSlots: one VA reservation, fixed slots, HIP-event-bounded lifetime
@@ -1075,6 +1111,27 @@ int main(int argc, char **argv) {
     printf("tokens      %d   pairs=%d/layer   slots main=%d pf=%d x %.3f MiB\n",
            T, P, NSLOTS, PFSLOTS, slotBytes / 1048576.0);
     printf("down decode mix: %d layer(s) Q4_K, %d layer(s) Q6_K\n", nDownQ4, NL - nDownQ4);
+
+    // --- C21/C24 run-window baselines (before the driver's own allocations) --
+    const uint64_t run_wall0 = mono_ns();
+    const knj::HostMem run_hmem0 = knj::host_mem();
+    const knj::CpuTime run_cpu0 = knj::cpu_time();
+    const knj::SystemCpu run_sys0 = knj::system_cpu();
+    const uint64_t run_vram0_used = dev_mem().used();
+    uint64_t run_vram_peak_used = run_vram0_used;
+    {
+        const knj::HostMem hm = knj::host_mem();
+        const DevMem v0 = dev_mem();
+        printf("platform    %s   logical cpus %d\n", knj::platform_name(), knj::logical_cpus());
+        printf("host ram    %.2f GiB total, %.2f GiB available (probe: C24 memprobe)\n",
+               (double)hm.phys_total_bytes / 1073741824.0,
+               (double)hm.phys_avail_bytes / 1073741824.0);
+        printf("vram         %.2f GiB total, %.2f GiB free, %.2f GiB used device-wide "
+               "(before this run's allocations)\n",
+               (double)v0.total_bytes / 1073741824.0,
+               (double)v0.free_bytes / 1073741824.0,
+               (double)v0.used() / 1073741824.0);
+    }
 
     // --- layer-0 input: synthetic tokens (xorshift, [-2,2]); weights real ----
     std::vector<std::vector<__half>> xIn((size_t)NL);
@@ -2276,6 +2333,7 @@ int main(int argc, char **argv) {
     };
 
     auto report = [&](const PassCfg &pc, const StackStats &ss) {
+        run_vram_peak_used = std::max(run_vram_peak_used, dev_mem().used());
         printf("\n--- pass %s ---\n", pc.name);
         printf("  wall %.3f ms   host-critical %.3f ms   per-layer wall ms:", ss.wall_ms, ss.host_ms);
         for (float v : ss.layer_ms) printf(" %.2f", v);
@@ -2298,6 +2356,24 @@ int main(int argc, char **argv) {
                    " + fill %.3f + bits %.3f + actgate %.3f + other %.3f = %.3f\n",
                    sync, dy, gate, up, silu, fuse, h2dda, bitg, fill, bits, actg, other,
                    (double)ss.host_ms);
+            // Phase 38: those fields are NOT all engine pipeline, and splitting
+            // them out is the only way a host-critical number here can mean
+            // anything about the engine. Three buckets, not two:
+            //   harness self-verification -- `fill` (sentinel assign), `bits`
+            //     (the I7 `bits_bad` scans) and `actgate` (the fuse-activation
+            //     compare over every element of every layer). Rule 7 and the bit
+            //     gate: mandatory, and they must stay.
+            //   host reference build -- `silu` (`actsH` via kj_silu_mul) is built
+            //     in BOTH paths, because it is the diff target for the fused
+            //     kernel. It is not what the fusion-OFF path transfers: that is
+            //     `h2d_da`.
+            //   engine pipeline -- everything left.
+            const float harness = (float)((double)(ss.host_fill_ns + ss.host_bits_ns +
+                                                   ss.host_actgate_ns) / 1e6);
+            const float refbuild = (float)((double)ss.host_silu_ns / 1e6);
+            printf("  of host-critical: harness self-verification (fill+bits+actgate) %.3f ms"
+                   " + host reference build (silu) %.3f ms + engine pipeline %.3f ms\n",
+                   harness, refbuild, ss.host_ms - harness - refbuild);
         }
         printf("\n");
         printf("  reads %llu (%.3f MiB, reader busy %.3f ms)  h2d %llu (%.3f ms)  pin %.3f ms\n",
@@ -2485,6 +2561,47 @@ int main(int argc, char **argv) {
     }
 
     HIPCHECK(hipStreamDestroy(compute));
+
+    // --- C21/C24 machine telemetry for the whole run -------------------------
+    {
+        const uint64_t wall_ns = mono_ns() - run_wall0;
+        const knj::HostMem hm = knj::host_mem();
+        const knj::CpuTime cpu1 = knj::cpu_time();
+        const knj::SystemCpu sys1 = knj::system_cpu();
+        const DevMem vr = dev_mem();
+        run_vram_peak_used = std::max(run_vram_peak_used, vr.used());
+        const uint64_t proc_cpu = cpu1.total_ns() - run_cpu0.total_ns();
+        const uint64_t proc_user = cpu1.user_ns - run_cpu0.user_ns;
+        const uint64_t proc_sys = cpu1.sys_ns - run_cpu0.sys_ns;
+        const uint64_t sys_busy = sys1.busy_ns > run_sys0.busy_ns ? sys1.busy_ns - run_sys0.busy_ns : 0;
+        const uint64_t sys_idle = sys1.idle_ns > run_sys0.idle_ns ? sys1.idle_ns - run_sys0.idle_ns : 0;
+        const double wall_s = (double)wall_ns / 1e9;
+        printf("\n=== Machine telemetry (C24 probe + hipMemGetInfo) ===\n");
+        printf("  platform %s   logical cpus %d   run wall %.3f s\n",
+               knj::platform_name(), knj::logical_cpus(), wall_s);
+        printf("  process cpu %.3f s = user %.3f + sys %.3f  = %.1f%% of wall "
+               "(1 core = 100%%)\n",
+               (double)proc_cpu / 1e9, (double)proc_user / 1e9, (double)proc_sys / 1e9,
+               wall_ns > 0 ? 100.0 * (double)proc_cpu / (double)wall_ns : 0.0);
+        if (sys_busy + sys_idle > 0)
+            printf("  host cpu busy over the window %.1f%% (system-wide, %d logical cpus)\n",
+                   100.0 * (double)sys_busy / (double)(sys_busy + sys_idle), knj::logical_cpus());
+        else
+            printf("  host cpu busy over the window: not measured (probe returned 0)\n");
+        print_mib("ram rss (this process)", hm.rss_bytes);
+        print_mib("ram rss peak (this process)", hm.peak_rss_bytes);
+        print_mib("ram private commit (this process)", hm.private_bytes);
+        print_mib("ram rss at start (this process)", run_hmem0.rss_bytes);
+        print_mib("ram total (machine)", hm.phys_total_bytes);
+        print_mib("ram available (machine)", hm.phys_avail_bytes);
+        print_mib("vram total", vr.total_bytes);
+        print_mib("vram free at end", vr.free_bytes);
+        print_mib("vram used at start (device-wide)", run_vram0_used);
+        print_mib("vram used at end (device-wide)", vr.used());
+        print_mib("vram used peak (device-wide)", run_vram_peak_used);
+        printf("  gpu utilisation: not queried -- no HIP API for it on this stack; "
+               "device busy attribution is the driver's own kernel/h2d timers above\n");
+    }
 
     printf("\n=== Summary ===\n");
     printf("  checks failed: %d\n", g_failed);

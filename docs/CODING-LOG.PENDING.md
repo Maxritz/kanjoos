@@ -135,6 +135,120 @@ and **genuine unexplained host work is now 17.271 ms OFF M3 / 16.861 ms ON M3 (0
 - Corrects the Phase 37 entry's characterisation of `silu` as the legacy host silu loop that the fused kernel replaces: it is the unconditional host reference build. The fused kernel replaces the **H2D(dA)** transfer (`h2d_da` 24.379 → 0.000), not that loop.
 - Corrects "Closing `other` requires a new instrumentation trap on the host-side experts-assembly loops": the split shows those loops were ~17 ms, and the 907 ms was the untimed harness self-verification.
 
+# Phase 39 — C21/C24 machine telemetry: RAM, VRAM, CPU  ·  DONE
+
+**Believed at the time**  `docs/06-profiling.md` specifies a C21 profiler (`kanjoos serve --profiling`, `--profile-dir`, `--profile-floor`, `--profile-warmup`, `--profile-detail`) and `docs/01-architecture.md` §3.1 requires the VRAM ceiling to be *measured*. `src/cli/main.cpp` parses none of those flags (`--model -p -n --ctx --threads --temp --top-k --top-p --seed --dump-tokens --dump-logits --top-logits --bench -h`), and **no file in the repository called `hipMemGetInfo`, read RSS, or sampled CPU time**. Every recorded run therefore quoted latency, bytes and counters with no memory or utilisation context at all.
+
+**Decision**  Add the probe in its smallest honest form, in the layer the layering rule allows: `src/platform/memprobe.{h,cpp}` (host-only ISO C++17, no HIP headers, `#ifdef _WIN32` confined to `src/platform/` per AGENTS.md §6), plus `hipMemGetInfo` at the call site in the driver because a device query must not become a dependency of a host-only translation unit. Report a three-way split of host-critical so the Phase 38 finding is visible in every future report rather than only in this log.
+
+**Changed**
+- `src/platform/memprobe.h`, `src/platform/memprobe.cpp` — new. `host_mem()` (RSS, peak RSS, private commit, machine total/available), `cpu_time()` and `system_cpu()` (sample-twice contract, the probe never averages), `platform_name()`, `logical_cpus()`. Windows via `K32GetProcessMemoryInfo` resolved from `kernel32.dll` at call time (no `psapi.lib` link dependency for hand-written hipcc lines), `GlobalMemoryStatusEx`, `GetProcessTimes`, `GetSystemTimes`; Linux via `/proc/self/status`, `/proc/meminfo`, `getrusage`, `/proc/stat`. A host that is neither reports **zeros**, so "not measured" can never read as a value.
+- `tools/bench/q4k_stream_ffn.hip` — includes the probe; prints platform / host RAM / VRAM in the run header; samples device-wide VRAM use at every `report()` and prints the peak; prints a machine-telemetry block before `=== Summary ===`; and the host-critical breakdown now carries a **three-way** split line (harness self-verification / host reference build / engine pipeline) instead of leaving the reader to reconstruct it.
+- `tools/bench/run_bench.sh` — `extra_sources_for()`: a driver that writes `#include "src/<area>/<name>.h"` gets `src/<area>/<name>.cpp` on its compile line when that file exists, and `-I<repo root>` is passed so the include resolves. Without this, tier B could never build `q4k_stream_ffn.hip` — it would report a link error naming `knj::ResidencyManager::*`, which reads as "the driver is broken" when the truth is "the runner forgot a file".
+
+**Verified**
+
+```sh
+hipcc -nogpulib -O2 --offload-arch=gfx1201 -Xclang -target-feature -Xclang +wavefrontsize32 \
+  -I tools/bench -I kernels -I . -L"G:/ROCM10RT-gfx1201/lib" -lamdhip64 \
+  -DUSE_HIP_RUNTIME -DSPILT_GEMM_PF2_TILE -DKNJ_BUILD_ARCH="gfx1201" -std=c++17 \
+  tools/bench/q4k_stream_ffn.hip src/residency/residency.cpp src/platform/memprobe.cpp \
+  -o /tmp/ksfp_tel2.exe            # -> rc 0
+KNJ_BUILD_ARCH=gfx1201 /tmp/ksfp_tel2.exe build/q4k/layer_all.job /tmp/ksfp_tel_out 512 2 16 0
+                                   # -> rc 0, 19 passes, checks failed: 0, RESULT: PASS
+```
+
+**Measurements — machine telemetry, whole 19-pass run (MEASURED)**
+
+| quantity | value | provenance |
+|---|---|---|
+| run wall | 195.543 s | MEASURED |
+| platform / logical cpus | win32 / 32 | MEASURED (memprobe) |
+| process cpu | 93.906 s = user 84.453 + sys 9.453 = **48.0%** of wall (1 core = 100%) | MEASURED |
+| host cpu busy over the window | 11.9% system-wide (32 cpus) | MEASURED |
+| RAM RSS (this process) | 941.3 MiB (start 15.7 MiB) | MEASURED |
+| RAM RSS peak (this process) | 2137.5 MiB | MEASURED |
+| RAM private commit | 932.7 MiB | MEASURED |
+| RAM total / available (machine) | 95.91 GiB / 63.30 GiB | MEASURED |
+| VRAM total | 16304.0 MiB (15.92 GiB) | MEASURED `hipMemGetInfo` |
+| VRAM used device-wide at start / end / peak | 151.1 / 895.8 / **908.5 MiB** | MEASURED, **device-wide** (includes other processes) |
+| GPU utilisation | **not queried** — no HIP API for it on this stack | REFUSED, stated in the output |
+
+M3 three-way split (the Phase 38 lesson, now in the artifact): `host-critical 1912.621 ms = harness self-verification (fill+bits+actgate) 1141.566 + host reference build (silu) 561.561 + engine pipeline 209.494`.
+
+**Consequences**
+- The engine's own RAM footprint for this workload is ~0.94 GiB and its VRAM footprint is under 1 GiB device-wide, against a 1.5 GiB slab and a 4.9 MiB slot pool — small enough that the 30B-scale projections in `04-memory-tiering.md` can now be sanity-checked against a real measured baseline rather than a table.
+- GPU utilisation remains REFUSED on purpose. `amdsmi`/`rocm-smi` would add a dependency this driver does not need, and an invented utilisation figure is worse than an explicit gap.
+
+**Still open**
+- The `--profiling` flag family in `docs/06-profiling.md` and `docs/BUILD-OUTLINE.md` is still unimplemented in `src/cli/main.cpp`; this entry adds the probe, not the CLI surface. Unblocked by: wiring `memprobe` into the CLI parser and the profile-header line.
+- `tools/bench/run_bench.sh` had not been re-run when this was written; see Phase 40 for the result.
+
+# Phase 40 — transport decomposition: the wire is fine, the pipeline is not  ·  DONE
+
+**Believed at the time**  Two measured numbers existed that could not both be true of the same hardware:
+
+- `docs/00-verified-facts.md` §8: PCIe, one 2.47 MB expert copy = **13.4–14.7 GB/s** → 181.3 µs for the 2.4609 MiB slab. `AGENTS.md` §11 builds its whole optimisation argument on this (7.68 µs of arithmetic against 181 µs of transfer).
+- `records/2026-10-07_gfx1201_expert_streaming.txt`: the streamed layer-0 FFN achieves **0.13–0.16 GiB/s** (read+H2D) — 150.781 / 165.479 / 181.873 ms over three runs for 23.34 MiB.
+
+That is a ~90× gap on the single operation the design depends on. Nothing in the repository decomposed it, so every optimisation decision (kernel vs residency vs transfer) was being taken without knowing which component owned the gap.
+
+**Decision**  Build a probe that measures the transport **in isolation** and attributes the total to named cases: read-only, pure H2D on a blocking stream, pure H2D on a non-blocking stream, read+H2D pipelined (double-buffered reader thread), and read+H2D with the harness's own pattern (a synchronous `hipMemcpy` D2H on the null stream) on both a blocking and a non-blocking copy stream. E vs F tests one specific hypothesis: a blocking stream implicitly synchronises with the legacy default stream, so the harness's synchronous D2H traffic may be serialising copies that the design believes are overlapped.
+
+**Changed**  `tools/bench/knj_xfer_probe.hip` — new tier-C driver (arch-guarded like every other one, exit 0/5/9/3/6/7). It is **self-sufficient with no arguments**, which is a requirement and not a convenience: `run_bench.sh` invokes every tier-C driver with none. With no `<file>` the read side becomes a host fill and every affected case is labelled `host-fill`; the read-only case reports `NOT RUN` explicitly rather than being dropped. Every copy case reads the device bytes back and compares them byte-for-byte with the buffer that produced them (an unsent copy that still "times fast" fails the check), and the read-only case is compared against an independent re-read of the same range.
+
+**Verified**  Built exactly as the runner builds it (`hipcc -nogpulib -O2 --offload-arch=gfx1201 -I kernels -I . -L"G:/ROCM10RT-gfx1201/lib" -lamdhip64 tools/bench/knj_xfer_probe.hip`, no `-std=c++17`, no extra sources) → rc 0. Run twice, both rc 0, both `checks failed: 0`, both `RESULT: PASS`: once with no arguments (the graded path) and once against the real GGUF:
+
+```sh
+KNJ_BUILD_ARCH=gfx1201 /tmp/knj_xfer_probe.exe
+KNJ_BUILD_ARCH=gfx1201 /tmp/knj_xfer_probe.exe \
+  "C:/Users/rr/OneDrive/Desktop/kraken/models/Qwen3-MOE-4x0.6B-2.4B-Q4_K_M.gguf" 2580480 64 0
+```
+
+**Measurements — 64 × 2.4609 MiB = 157.50 MiB per case (MEASURED)**
+
+| case | no-arg MiB/s | file MiB/s | ms/copy (file) |
+|---|---|---|---|
+| A read-only | NOT RUN | 5679.32 | 0.433 |
+| B h2d, blocking stream | 8735.25 | 7832.12 | 0.314 |
+| C h2d, non-blocking stream | 8186.71 | 6922.22 | 0.356 |
+| D read+h2d pipelined | 6685.34 | 4277.55 | 0.575 |
+| E D + synchronous D2H per iteration, blocking copy stream | 2780.20 | 2403.21 | 1.024 |
+| F E with the copy stream non-blocking | 3619.23 | 3020.79 | 0.815 |
+
+Derived ratios (MEASURED, from the table):
+
+- **E/D = 2.405× (no-arg) / 1.780× (file)** — the harness's synchronous D2H genuinely costs the transport, and the mechanism is the one hypothesised: a blocking stream's implicit synchronisation with the legacy default stream.
+- **F/E = 0.768× (no-arg) / 0.796× (file)** — `hipStreamNonBlocking` recovers ~20–23% of that cost. The hypothesis is **partially confirmed**: the effect is real and the flag is a real part of the fix, but the flag alone does not close it.
+
+**The finding that matters**
+
+- **The transport is not the bottleneck.** Pipelined read+H2D runs at **4.3–6.7 GiB/s** in isolation (0.575 ms per 2.4609 MiB slab) against an FFN pipeline that achieves **~0.15 GiB/s** — a **28–44× gap**, and the gap is with *identical* transfers, slab sizes and file. The missing time is therefore in the pipeline's waits and serialisation (slot lifetime, demand ordering, the per-layer synchronous D2H points, the C8/C9 dance), not on the wire.
+- **This invalidates the reading that the streamed path is bandwidth-limited.** Any claim of the form "the streamed pipeline is transfer-bound at 0.15 GiB/s" is wrong as stated: it is *coordination*-bound, with a transport capable of 4–8 GiB/s. Under AGENTS.md `REFUSED`/`DERIVED` labelling: the 0.15 GiB/s figure stays MEASURED, the *attribution* changes.
+- **The docs' single-copy reference is not reproduced.** B measures 6.9–8.7 GiB/s where `docs/00-verified-facts.md` §8 records 13.4–14.7 GB/s, i.e. 0.47–0.63× on the same hardware. Either that number came from a different measurement shape (a single cold copy rather than a polled loop, a different direction, a larger burst) or it is optimistic. It is **not** re-pinned here; recorded as a discrepancy with both numbers and their methods named.
+
+**Consequences**
+- The next optimisation target is the **pipeline's per-request critical path**, not kernel time and not PCIe bandwidth: instrument submit → slot free → copy done → kernel done → release and find where the ~15 ms per request goes. A blocking→non-blocking copy stream is a one-line part of the fix with a measured ~20% effect.
+- Phase 38's `h2d ... (4935 ms)` field must not be read as bandwidth: it is a sum of per-transfer submit→event latencies, so it includes queue wait. The probe is what separates the two.
+
+**Gate re-verification (after the `run_bench.sh` change)**
+
+The documented gate is `bash tools/bench/run_bench.sh`, expected exit 0. It was run twice, before and after the change.
+
+| run | rc | what happened |
+|---|---|---|
+| before | **5** | `q4k_moe_ffn: TIER C FAILED (exit 2)` and `q4k_stream_ffn: TIER C FAILED (exit 2)` — both **usage errors** from the missing arguments, reported as "the kernel does not compute the right answer on the real device". That sentence was false: neither driver executed a kernel. |
+| after | **0** | both report `NOT RUN  <their own declared reason>`; a new exit-2 branch says USAGE ERROR and names the fix. The exit-5 path for a genuine oracle disagreement is untouched. |
+
+- The new driver ran **in the gate with no arguments**: `knj_xfer_probe` tier C → `checks failed: 0`, `RESULT: PASS`. Third independent sample of the transport table: B 9880.80 / C 8859.11 / D 7263.52 / E 2761.97 / F 4156.70 MiB/s, **E/D 2.630×**, **F/E 0.664×** — consistent with the two runs above (E/D 1.78–2.63×, F/E 0.664–0.796×).
+- Pinned baselines unchanged and inside tolerance: `attn_c16 PREFILL_US` got 9629.8 (pin max 9650), `attn_c16 DECODE_US` got 194.2 (pin max 200), `gemm_tiled BEST_PCT` got 21.7 (pin min 21.4). No regression, nothing re-pinned.
+- Tier B still refuses `attn_c16` and `gemm_tiled` with `'hip/hip_runtime.h' file not found` — the `-nogpuinc` defect already recorded in `AGENTS.md` §3. Unchanged by this work, and not caused by it.
+- Other documented commands re-verified after the edits: `python tools/check_docs.py` → rc 0 (24 figures), `python tools/kvroof/kv_roofline.py models/qwen3-30b-a3b/config.json --check` → rc 0 (71 claims), `python tools/i7/i7_bit_identity.py` → rc 0 (bitwise agree, all negative controls detected). `python tools/route/route_locality.py` as written in `AGENTS.md` §7 → **rc 2**: it needs `--model`, and `--source target-gates` needs `--donor`, for which no local MoE weights exist in this checkout (`models/qwen3-30b-a3b/` is `config.json` + provenance only). Its committed `route_*.json` artifacts remain the record; the documented one-liner is a doc defect.
+
+**Still open**
+- The per-request critical-path instrumentation above — unblocked by: adding the five timestamps to the driver's request record.
+- Whether the OneDrive-hosted model path inflates the read side in the FFN run (the probe's reads hit the page cache at 5.7 GiB/s, and 610 MiB of a 964 MiB file is re-read across 19 passes) — unblocked by: a cold-cache comparison against a copy of the file outside OneDrive.
+
 **Notes**
 - `q4k_stream_ffn.hip` includes `rocwmma/rocwmma.hpp` and therefore needs `-std=c++17` on the hipcc line (rocWMMA header need, not a preference); the `-I .` is required so `#include "src/residency/residency.h"` resolves; `src/residency/residency.cpp` must be on the hipcc link line (`lld-link` otherwise reports undefined `knj::ResidencyManager::*`).
 - `run_on_rc` / `run_off_rc` are captured via `set -o pipefail` and `${PIPESTATUS[0]}` so a filtered output never masks the runner's real exit code.

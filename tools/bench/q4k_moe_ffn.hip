@@ -1,6 +1,8 @@
 // tools/bench/q4k_moe_ffn.hip -- the Qwen3-MoE FFN forward, on gfx1201, from
 // REAL GGUF Q4_K / Q6_K expert bytes, via rocWMMA.
 //
+// KNJ_BENCH_REQUIRES: a job file naming an external GGUF and a dump directory (argv: <job> <dumpdir> [tokens]). The gate passes no arguments, so this driver is reported NOT RUN rather than failed on a usage error.
+//
 // WHAT PROBLEM THIS SOLVES
 // ------------------------
 // Every performance number the project owns is a HOST number. The device has

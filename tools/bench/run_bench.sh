@@ -145,6 +145,38 @@ find_rocm_lib_path() {
 # A rocWMMA driver is recognised by its include, so a new one is picked up with
 # no list to keep in sync.
 is_rocwmma_driver() { grep -qE '#include[[:space:]]*<rocwmma/rocwmma\.hpp>' "$1"; }
+
+# Project sources a driver links against, recognised the same way: a driver that
+# writes `#include "src/<area>/<name>.h"` gets `src/<area>/<name>.cpp` added to
+# its compile line when that file exists. The alternative is a hand-maintained
+# list, and the failure mode of a stale list is a link error naming the COMPONENT
+# (undefined `knj::ResidencyManager::*`) that reads as "the driver is broken"
+# when the truth is "the runner forgot a file". Nothing to keep in sync.
+# What a driver needs in order to be run by the gate, declared in its own source
+# so the reason travels with the driver instead of living in a list here:
+#
+#   // KNJ_BENCH_ARGS: <argv the driver needs>   -> the gate passes those argv
+#   // KNJ_BENCH_REQUIRES: <reason>              -> NOT RUN, reason printed
+#
+# WITHOUT THIS, a driver that needs a model file exits 2 on a usage error and the
+# runner reports "the kernel does not compute the right answer on the real
+# device" — which is a different, false claim about a driver that never
+# executed a kernel. A driver that did not run is reported, never omitted, and
+# never mislabelled (rule 9).
+bench_declared() {   # $1 = file, $2 = tag
+  grep -m1 -E "^//[[:space:]]*$2:" "$1" 2>/dev/null |
+    sed -e "s|^//[[:space:]]*$2:[[:space:]]*||"
+}
+extra_sources_for() {
+  local src="${1:-}" inc abs
+  [ -f "$src" ] || return 0
+  grep -oE '#include[[:space:]]*"src/[A-Za-z0-9_/.-]+\.h"' "$src" 2>/dev/null |
+    sed -e 's/^#include[[:space:]]*"//' -e 's/"$//' |
+    while IFS= read -r inc; do
+      abs="$(cd "$HERE/../.." && pwd)/${inc%.h}.cpp"
+      [ -f "$abs" ] && printf ' %s' "$abs"
+    done
+}
 rocwmma_flags_for() {
   # Two statements, not `local a=b c=$a`: bash expands every word of a
   # declaration command before applying any of its assignments, so the second
@@ -424,9 +456,14 @@ else
       if is_rocwmma_driver "$src"; then
         read -r -a EXTRA <<< "$(rocwmma_flags_for "$libroot")"
       fi
+      # -I<repo root> so a driver's `#include "src/..."` resolves, and the
+      # matching .cpp files on the link line. Both are per-source and inert for
+      # the drivers that do not use src/ (today: only q4k_stream_ffn.hip does).
       if ! "$HIPCC" ${EXTRA[@]+"${EXTRA[@]}"} -nogpulib -O2 --offload-arch="$arch" \
            -I"$(cd "$HERE/../.." && pwd)/kernels" \
-           -L"${winroot}\\lib" -lamdhip64 "$src" -o "$TMP/$b.$arch.exe" \
+           -I"$(cd "$HERE/../.." && pwd)" \
+           -L"${winroot}\\lib" -lamdhip64 $(extra_sources_for "$src") "$src" \
+           -o "$TMP/$b.$arch.exe" \
            >"$TMP/$b.$arch.err" 2>&1; then
         # A refusal here is often CORRECT: gfx1031 has no WMMA, so the _gfx12
         # builtin is rightly rejected. Only a driver that built for NO arch
@@ -436,6 +473,12 @@ else
         continue
       fi
       BUILT_ANY[$(basename "$src")]=""
+      BENCH_ARGS="$(bench_declared "$src" KNJ_BENCH_ARGS)"
+      BENCH_REQ="$(bench_declared "$src" KNJ_BENCH_REQUIRES)"
+      if [ -n "$BENCH_REQ" ] && [ -z "$BENCH_ARGS" ]; then
+        printf 'NOT RUN   %s\n' "$BENCH_REQ"
+        continue
+      fi
       # No -D for the arch guard: hipcc re-spawns clang through a command
       # STRING, so a -D carrying quotes loses them to the inner shell and
       # the compiler receives a bare identifier. The environment does not
@@ -443,7 +486,9 @@ else
       # stdout is captured (tee) so the baseline check can read the
       # driver's own numbers; the tier C gate below is unchanged and
       # still judged on the DRIVER's exit code, not tees.
-      KNJ_BUILD_ARCH="$arch" "$TMP/$b.$arch.exe" | tee "$TMP/$b.$arch.out"
+      ARGV=()
+      [ -n "$BENCH_ARGS" ] && read -r -a ARGV <<< "$BENCH_ARGS"
+      KNJ_BUILD_ARCH="$arch" "$TMP/$b.$arch.exe" ${ARGV[@]+"${ARGV[@]}"} | tee "$TMP/$b.$arch.out"
       rc=${PIPESTATUS[0]}
       if [ $rc -eq 6 ]; then
         # The driver declined to run: its code object targets a different arch
@@ -453,7 +498,15 @@ else
         echo
         continue
       fi
-      if [ $rc -ne 0 ]; then
+      if [ $rc -eq 2 ]; then
+        # A usage error, not a wrong answer: the driver wants arguments the gate
+        # does not have. Say that, and say how to fix it, rather than blaming
+        # the kernel for arithmetic it never performed.
+        echo "  $b: USAGE ERROR (exit 2) — this driver needs arguments the gate"
+        echo "        does not pass it. Declare them with '// KNJ_BENCH_ARGS: ...',"
+        echo "        or '// KNJ_BENCH_REQUIRES: <reason>' if it cannot run here."
+        TIER_C_RC=5
+      elif [ $rc -ne 0 ]; then
         echo "  $b: TIER C FAILED (exit $rc) — the kernel does not compute the"
         echo "        right answer on the real device. Its timing is meaningless."
         TIER_C_RC=5
