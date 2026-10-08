@@ -17,12 +17,16 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 include(cmake/arch.cmake)
 include(cmake/sanitize.cmake)
 
-# Primary target: gfx1031 (RDNA2) on Windows 11. gfx1201 (RDNA4) is the
-# secondary/dev-bench arch and stays fully supported; pass -DKNJ_ARCH=gfx1201
-# to build for it explicitly.
+# Target order is the one AGENTS.md section 1 states: gfx1201 (RDNA4) on
+# Windows 11 first, then gfx1201 Linux, then gfx1031 (RDNA2). gfx1031 is fully
+# supported and stays selected with -DKNJ_ARCH=gfx1031.
 if(NOT DEFINED KNJ_ARCH)
-  set(KNJ_ARCH "gfx1031" CACHE STRING "Target GPU arch: gfx1031 (primary) or gfx1201")
-  set_property(CACHE KNJ_ARCH PROPERTY STRINGS gfx1031 gfx1201)
+  # gfx1201 is the first target (AGENTS.md section 1: gfx1201 on Windows 11 first,
+  # then gfx1201 Linux, then gfx1031). The previous default was gfx1031, which
+  # contradicted the stated target order; gfx1031 stays fully supported and is
+  # selected with -DKNJ_ARCH=gfx1031.
+  set(KNJ_ARCH "gfx1201" CACHE STRING "Target GPU arch: gfx1201 (first target) or gfx1031")
+  set_property(CACHE KNJ_ARCH PROPERTY STRINGS gfx1201 gfx1031)
 endif()
 
 # Derived per-arch flag lists (used by the HIP and device-compile paths).
@@ -93,3 +97,30 @@ add_subdirectory(tests/unit)
 if(KNJ_HAS_DEVICE_BUILD)
   add_subdirectory(tests/integration)
 endif()
+
+# ---------------------------------------------------------------------------
+# Host runtime -- the engine that loads a GGUF and runs it, plus the C21
+# profiler and the C24 platform probe it reports through.
+#
+# This target did not exist: src/cli, src/model, src/loader, src/tokenizer,
+# src/util, src/platform and src/profiler were all written, and nothing in the
+# build referenced any of them, so the repository could not produce a single
+# executable that loads a model. Host-only ISO C++17, no HIP, no device code.
+# ---------------------------------------------------------------------------
+add_library(knj_runtime STATIC
+    src/platform/memprobe.cpp
+    src/profiler/profiler.cpp
+    src/util/parallel.cpp
+    src/loader/gguf.cpp
+    src/loader/dequant.cpp
+    src/tokenizer/tokenizer.cpp
+    src/model/model.cpp
+)
+target_include_directories(knj_runtime PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(knj_runtime PUBLIC cxx_std_17)
+find_package(Threads REQUIRED)
+target_link_libraries(knj_runtime PUBLIC Threads::Threads)
+
+add_executable(kanjoos-run src/cli/main.cpp)
+target_link_libraries(kanjoos-run PRIVATE knj_runtime)
+target_compile_features(kanjoos-run PRIVATE cxx_std_17)

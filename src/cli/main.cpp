@@ -17,6 +17,8 @@
 #include <vector>
 
 #include "src/model/model.h"
+#include "src/platform/memprobe.h"
+#include "src/profiler/profiler.h"
 
 namespace {
 
@@ -40,6 +42,16 @@ struct Args {
   int bench_pp = 128;
   int bench_tg = 32;
   bool show_geometry = true;
+  // docs/06-profiling.md section 1. `--profiling` never changes what the engine
+  // computes; it changes what it measures, and the report says which clock it
+  // measured on.
+  bool profiling = false;
+  std::string profile_format = "table";   // table | json | csv
+  std::string profile_detail = "class";   // class | layer | kernel
+  std::string profile_dir;
+  int profile_floor = 256;
+  int profile_warmup = 8;
+  bool profile_no_subtract = false;
 };
 
 void usage() {
@@ -57,7 +69,12 @@ void usage() {
       "  --seed N          RNG seed (default 1)\n"
       "  --dump-tokens     print the prompt's token ids\n"
       "  --dump-logits     print the top tokens at the first generated position\n"
-      "  --bench PP TG     time a PP-token prefill and a TG-token decode run\n");
+      "  --bench PP TG     time a PP-token prefill and a TG-token decode run\n"
+      "  --profiling[=FMT] profile the run: table (default), json, csv, no-subtract, off\n"
+      "  --profile-dir DIR also write profile.{txt,json,csv} into DIR\n"
+      "  --profile-floor N empty ops timed through the same begin/end path (default 256)\n"
+      "  --profile-warmup N discard the first N steps (default 8)\n"
+      "  --profile-detail=D component detail: class (default), layer, kernel\n");
 }
 
 int32_t sample(const float* logits, int n_vocab, const Args& a, std::mt19937& rng) {
@@ -123,7 +140,34 @@ Args parse(int argc, char** argv) {
     else if (s == "--dump-tokens") a.dump_tokens = true;
     else if (s == "--dump-logits") a.dump_logits = true;
     else if (s == "--top-logits") a.top_logits = std::stoi(next());
-    else if (s == "--bench") {
+    else if (s == "--profile-dir") a.profile_dir = next();
+    else if (s == "--profile-floor") a.profile_floor = std::stoi(next());
+    else if (s == "--profile-warmup") a.profile_warmup = std::stoi(next());
+    else if (s.rfind("--profile-detail=", 0) == 0) {
+      a.profile_detail = s.substr(std::strlen("--profile-detail="));
+      if (a.profile_detail != "class" && a.profile_detail != "layer" &&
+          a.profile_detail != "kernel") {
+        throw std::runtime_error("--profile-detail must be class, layer or kernel");
+      }
+    } else if (s.rfind("--profiling", 0) == 0) {
+      a.profiling = true;
+      const size_t eq = s.find('=');
+      if (eq != std::string::npos) a.profile_format = s.substr(eq + 1);
+      if (a.profile_format == "off") {
+        a.profiling = false;
+        a.profile_format = "table";
+      } else if (a.profile_format == "no-subtract") {
+        a.profile_no_subtract = true;
+        a.profile_format = "table";
+      } else if (a.profile_format != "table" && a.profile_format != "json" &&
+                 a.profile_format != "csv") {
+        // `counters` and `full` are in the document's list and are NOT
+        // implemented here. Refuse rather than quietly print something else.
+        throw std::runtime_error("--profiling=" + a.profile_format +
+                                 " is not implemented; this build implements "
+                                 "off|table|json|csv|no-subtract (docs/06-profiling.md s1)");
+      }
+    } else if (s == "--bench") {
       a.bench = true;
       a.bench_pp = std::stoi(next());
       a.bench_tg = std::stoi(next());
@@ -151,15 +195,25 @@ void run_bench(Model& m, const Args& a) {
   std::vector<int32_t> ids(pp, 1000);
   m.reset();
   auto t0 = std::chrono::steady_clock::now();
-  for (int i = 0; i < pp; ++i) m.forward(&ids[i], 1);
+  {
+    KNJ_PROFILE_OP("prefill");
+    for (int i = 0; i < pp; ++i) {
+      m.forward(&ids[i], 1);
+      knj::Profiler::get().step_done();
+    }
+  }
   const double pp_ms = ms_since(t0);
 
   // A decode run must be a real decode: one token at a time, each attending to
   // everything before it.
   std::vector<std::vector<float>> logits_sink;
   t0 = std::chrono::steady_clock::now();
-  for (int i = 0; i < tg; ++i) {
-    m.forward(&ids[0], 1);
+  {
+    KNJ_PROFILE_OP("decode");
+    for (int i = 0; i < tg; ++i) {
+      m.forward(&ids[0], 1);
+      knj::Profiler::get().step_done();
+    }
   }
   const double tg_ms = ms_since(t0);
 
@@ -178,8 +232,28 @@ int main(int argc, char** argv) {
     opt.n_ctx = a.n_ctx;
     opt.threads = a.threads;
 
+    // C21. Configured before anything is loaded so `load` is itself an op in the
+    // table, and the floor is measured before the first real op so the empty-op
+    // cost belongs to this run rather than to a previous one.
+    knj::ProfileConfig pc;
+    pc.on = a.profiling;
+    pc.format = a.profile_format;
+    pc.detail = a.profile_detail;
+    pc.dir = a.profile_dir;
+    pc.floor_ops = a.profile_floor;
+    pc.warmup_steps = a.profile_warmup;
+    pc.subtract_floor = !a.profile_no_subtract;
+    knj::Profiler& prof = knj::Profiler::get();
+    prof.configure(pc);
+    prof.set_domain(knj::ClockDomain::Host);
+    prof.measure_floor();
+
     auto t_open0 = std::chrono::steady_clock::now();
-    std::unique_ptr<Model> m = Model::open(a.model, opt);
+    std::unique_ptr<Model> m;
+    {
+      KNJ_PROFILE_OP("load");
+      m = Model::open(a.model, opt);
+    }
     const double open_ms = ms_since(t_open0);
 
     std::printf("model      : %s\n", a.model.c_str());
@@ -195,7 +269,11 @@ int main(int argc, char** argv) {
     std::printf("tokenizer  : vocab %d, bos %d, eos %d, add_bos %d\n", tok.vocab_size(),
                 tok.bos_id(), tok.eos_id(), (int)tok.add_bos());
 
-    std::vector<int32_t> prompt = tok.encode(a.prompt, false);
+    std::vector<int32_t> prompt;
+    {
+      KNJ_PROFILE_OP("tokenize");
+      prompt = tok.encode(a.prompt, false);
+    }
     if (tok.add_bos() && tok.bos_id() >= 0) prompt.insert(prompt.begin(), tok.bos_id());
     if (prompt.empty()) throw std::runtime_error("prompt tokenised to nothing");
     if (a.dump_tokens) {
@@ -210,14 +288,44 @@ int main(int argc, char** argv) {
       throw std::runtime_error("prompt longer than the context");
     }
 
+    // One report path for every exit, so a profiled run can never end without
+    // its table. `finish` is defined here because it needs the loaded model.
+    auto finish = [&]() {
+      if (!a.profiling) return;
+      knj::Profiler& p = knj::Profiler::get();
+      const knj::HostMem hm = knj::host_mem();
+      char dev[256];
+      std::snprintf(dev, sizeof(dev),
+                    "host CPU reference path (no device backend)   threads %d   ctx %d   "
+                    "vocab %d",
+                    m->threads(), m->n_ctx(), m->geom().n_vocab);
+      char bud[384];
+      std::snprintf(bud, sizeof(bud),
+                    "vram NOT MEASURED here (no device on this path)   ram %.2f/%.2f GiB "
+                    "available   rss peak %.0f MiB   platform %s   cpus %d",
+                    (double)hm.phys_avail_bytes / 1073741824.0,
+                    (double)hm.phys_total_bytes / 1073741824.0,
+                    (double)hm.peak_rss_bytes / 1048576.0, knj::platform_name(),
+                    knj::logical_cpus());
+      p.print_header(stdout, "0.1.0", dev, bud);
+      p.report(stdout);
+      p.write_dir();
+    };
+
     if (a.bench) {
       run_bench(*m, a);
+      finish();
       return 0;
     }
 
     // Prefill: the whole prompt in one call, which is what batched weights buy.
     auto t0 = std::chrono::steady_clock::now();
-    const float* logits = m->forward(prompt.data(), (int)prompt.size());
+    const float* logits = nullptr;
+    {
+      KNJ_PROFILE_OP("prefill");
+      logits = m->forward(prompt.data(), (int)prompt.size());
+      prof.step_done();
+    }
     const double pp_ms = ms_since(t0);
 
     if (a.dump_logits) {
@@ -236,15 +344,27 @@ int main(int argc, char** argv) {
     std::mt19937 rng(a.seed);
     std::vector<int32_t> gen;
     double tg_ms = 0.0;
-    int32_t next = sample(logits, m->geom().n_vocab, a, rng);
+    int32_t next = 0;
+    {
+      KNJ_PROFILE_OP("sample");
+      next = sample(logits, m->geom().n_vocab, a, rng);
+    }
     for (int i = 0; i < a.n_predict; ++i) {
       gen.push_back(next);
       if (next == tok.eos_id()) break;
       if (m->pos() + 1 > m->n_ctx()) break;
       auto t1 = std::chrono::steady_clock::now();
-      const float* l = m->forward(&next, 1);
+      const float* l = nullptr;
+      {
+        KNJ_PROFILE_OP("decode");
+        l = m->forward(&next, 1);
+        prof.step_done();
+      }
       tg_ms += ms_since(t1);
-      next = sample(l, m->geom().n_vocab, a, rng);
+      {
+        KNJ_PROFILE_OP("sample");
+        next = sample(l, m->geom().n_vocab, a, rng);
+      }
     }
 
     std::printf("\nprompt     : %s\n", a.prompt.c_str());
@@ -256,6 +376,7 @@ int main(int argc, char** argv) {
       std::printf("decode     : %zu tokens in %8.2f ms  %10.2f tok/s  (%.3f ms/token)\n",
                   gen.size(), tg_ms, 1000.0 * (double)gen.size() / tg_ms, tg_ms / (double)gen.size());
     }
+    finish();
     return 0;
   } catch (const std::exception& e) {
     std::fprintf(stderr, "error: %s\n", e.what());

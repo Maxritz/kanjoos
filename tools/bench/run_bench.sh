@@ -55,6 +55,12 @@ HOST_ONLY=0
 if [ "${1:-}" = "--host-only" ]; then HOST_ONLY=1; shift; fi
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(cd "$HERE/../.." && pwd)"
+
+# The device clang is a native binary: under Git Bash it wants Windows-form
+# paths, and an -I that MSYS happens to convert is not the same thing as one
+# that is spelled correctly. One helper, used by every -I and --rocm-path below.
+winpath() { cygpath -m "$1" 2>/dev/null || printf '%s' "$1"; }
 
 # ------------------------------------------------------------- toolchain ---
 CLANG="${1:-}"
@@ -252,6 +258,18 @@ fi
 echo "=============================================================================="
 echo "TIER B  device compile census (instruction + resource, NOT throughput)"
 echo "=============================================================================="
+# WHY THIS TIER USED TO MEASURE NOTHING
+# -------------------------------------
+# The census used to pass -nogpuinc, which suppresses the GPU include paths, so
+# every driver answered 'hip/hip_runtime.h' file not found and tier B reported an
+# empty census while its own preflight said the toolchain was healthy. The
+# census therefore never reached the link step that the sources a driver needs
+# affect. The fix is the spelling AGENTS.md section 3 records as verified by
+# hand: no -nogpuinc, --rocm-path at the ROCm ROOT (the <root>/lib/llvm spelling
+# belongs to the hipcc rocWMMA line, a different tool with a different search
+# order), and the include roots the real build uses (-I kernels, -I repo root).
+# A driver that still refuses is reporting a real defect in ITSELF, which is the
+# point of the census.
 
 UNHEALTHY=""
 for a in "${ARCHS[@]}"; do
@@ -284,8 +302,17 @@ for arch in "${ARCHS[@]}"; do
   for src in "${BENCHES[@]}"; do
     b="$(basename "$src" .hip)"
     printf '  %-14s ' "$b"
-    if ! "$CLANG" --offload-arch="$arch" -nogpuinc -nogpulib --cuda-device-only \
-         -x hip -std=c++17 -DKNJ_DEVICE_TIER=1 -I"$HERE" "${f[@]}" \
+    cflags=("-I$(winpath "$HERE")" "-I$(winpath "$ROOT/kernels")" "-I$(winpath "$ROOT")")
+    root="$(rocm_lib_root_for_arch "$arch")"
+    if [ -n "$root" ]; then
+      cflags+=("--rocm-path=$(winpath "$root")")
+      # Only for the drivers that include rocWMMA, matching the tier C rule: a
+      # rocWMMA flag must not leak into a driver that does not use it.
+      if is_rocwmma_driver "$src"; then cflags+=("-I$(winpath "$root/include")"); fi
+    fi
+    if ! "$CLANG" --offload-arch="$arch" -nogpulib --cuda-device-only \
+         -x hip -std=c++17 -DKNJ_DEVICE_TIER=1 \
+         ${cflags[@]+"${cflags[@]}"} "${f[@]}" \
          -S "$src" -o "$TMP/$b.$arch.s" 2>"$TMP/$b.$arch.err"; then
       if grep -qE 'Stack dump|failed due to signal' "$TMP/$b.$arch.err"; then
         printf 'CRASH   %s\n' "$(grep -m1 'Running pass' "$TMP/$b.$arch.err" | sed 's/.*Running pass/Running pass/')"

@@ -5,8 +5,15 @@
 #include <stdexcept>
 
 #ifdef _WIN32
+// Guarded because the C++ library's own platform headers may already define
+// these (MinGW's bits/os_defines.h does), and an unguarded redefine is a
+// warning on every build -- noise that trains a reader to ignore the build log.
+#ifndef NOMINMAX
 #define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
+#endif
 #include <windows.h>
 #endif
 

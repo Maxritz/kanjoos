@@ -1,11 +1,23 @@
 # 06 — Profiling and telemetry
 
-> **STATUS: spec, not yet built.** No `kanjoos` binary exists; nothing in this
-> document has ever run. Every number printed in a block below is a
-> **format example**, not a measurement. Real, measured numbers live in
-> `docs/00-verified-facts.md`, `docs/03-kernels.md` and `tools/bench/` output,
-> and are labelled MEASURED where they appear. (Corollary for readers
-> extracting figures: `12.22 tok/s` in section 2 is a placeholder.)
+> **STATUS: partly built (2026-10-08).** The C21 core exists in
+> `src/profiler/profiler.{h,cpp}` and is driven by `kanjoos-run`, which the root
+> build now produces (`knj_runtime` + `kanjoos-run` targets). Implemented and
+> verified: `--profiling[=table|json|csv|no-subtract|off]`, `--profile-dir`,
+> `--profile-floor`, `--profile-warmup`, `--profile-detail=class|layer`. **Not**
+> implemented: `--profiling=counters`, `--profiling=full` (both are refused with a
+> message rather than silently redefined), the `kanjoos serve` spelling, and the
+> device event backend — so on the host path `dev` and `host` are the same
+> interval and every report says `clock host` and which convention is in force.
+> The residency and transfer footers print `NOT MEASURED on this path` until a
+> path that has them reports in.
+>
+> **Every number in the blocks below is still a format example and none of them
+> has ever been produced by a run.** The values are unchanged from the original
+> spec; they are not measurements, and must not be quoted as such. (Corollary for
+> readers extracting figures: `12.22 tok/s` in section 2 is a placeholder.) A
+> real, measured table from this machine is in `docs/CODING-LOG.PENDING.md`
+> (Phase 42) — same columns, actual microseconds, on the Qwen3-MoE-4x0.6B GGUF.
 
 This is a deliverable with an output contract, not a debugging aid. If the engine
 cannot say where its microseconds went, every other decision in this plan is

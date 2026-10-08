@@ -26,6 +26,7 @@
 #include <string>
 
 #include "src/loader/dequant.h"
+#include "src/profiler/profiler.h"
 
 namespace knj {
 namespace {
@@ -33,6 +34,15 @@ namespace {
 // Blocks are at most 256 weights (the K-quants), and dequant_dot_f32 relies on
 // that. Fail loudly rather than overflow a stack buffer if ggml ever adds one.
 constexpr int kMaxBlockWeights = 256;
+
+// C21 scope names are "class" or "class:scope". The profiler groups by class
+// for --profile-detail=class and keeps the whole string for =layer, so one
+// instrumentation pass serves both. Copying the pattern here keeps the model
+// free of any knowledge of the profiler's grouping rules.
+inline void profile_name(char* buf, size_t n, const char* cls, int layer) {
+  if (layer < 0) std::snprintf(buf, n, "%s", cls);
+  else std::snprintf(buf, n, "%s:%d", cls, layer);
+}
 
 inline float silu(float x) { return x / (1.0f + std::exp(-x)); }
 
@@ -473,6 +483,7 @@ const float* Model::forward(const int32_t* tokens, int n) {
   // Embeddings: the token index selects a column of token_embd, which is one
   // contiguous run of H weights.
   {
+    KNJ_PROFILE_OP("embed");
     const uint64_t stride = column_stride_bytes(tok_embd_->type, H);
     const uint8_t* base = file_.data_of(*tok_embd_);
     for (int t = 0; t < n; ++t) {
@@ -488,13 +499,25 @@ const float* Model::forward(const int32_t* tokens, int n) {
 
   for (int il = 0; il < g_.n_layer; ++il) {
     const Layer& w = layers_[il];
+    char nm[48];
 
-    rmsnorm_rows(x_.data(), n, H, *w.attn_norm, xn_.data());
+    {
+      profile_name(nm, sizeof(nm), "norm", il);
+      KNJ_PROFILE_OP(nm);
+      rmsnorm_rows(x_.data(), n, H, *w.attn_norm, xn_.data());
+    }
     if (dbg && il == 0) dump_f32("01_attn_norm", xn_.data(), (size_t)n * H);
-    matmul(*w.attn_q, xn_.data(), n, H, q_.data(), QD);
-    matmul(*w.attn_k, xn_.data(), n, H, k_.data(), KVD);
-    matmul(*w.attn_v, xn_.data(), n, H, v_.data(), KVD);
+    {
+      profile_name(nm, sizeof(nm), "qkv", il);
+      KNJ_PROFILE_OP(nm);
+      matmul(*w.attn_q, xn_.data(), n, H, q_.data(), QD);
+      matmul(*w.attn_k, xn_.data(), n, H, k_.data(), KVD);
+      matmul(*w.attn_v, xn_.data(), n, H, v_.data(), KVD);
+    }
 
+    profile_name(nm, sizeof(nm), "attention", il);
+    {
+    KNJ_PROFILE_OP(nm);
     for (int t = 0; t < n; ++t) {
       const int p = pos_ + t;
       float* q = q_.data() + (size_t)t * QD;
@@ -549,13 +572,22 @@ const float* Model::forward(const int32_t* tokens, int n) {
         }
       }
     }
+    }  // attention
 
     if (dbg && il == 0) dump_f32("05_ctx", ctx_.data(), (size_t)n * QD);
-    matmul(*w.attn_o, ctx_.data(), n, QD, ao_.data(), H);
-    for (size_t i = 0, cnt = (size_t)n * H; i < cnt; ++i) x_[i] += ao_[i];
+    {
+      profile_name(nm, sizeof(nm), "attn-o", il);
+      KNJ_PROFILE_OP(nm);
+      matmul(*w.attn_o, ctx_.data(), n, QD, ao_.data(), H);
+      for (size_t i = 0, cnt = (size_t)n * H; i < cnt; ++i) x_[i] += ao_[i];
+    }
     if (dbg && il == 0) dump_f32("06_after_attn", x_.data(), (size_t)n * H);
 
-    rmsnorm_rows(x_.data(), n, H, *w.ffn_norm, hx_.data());
+    {
+      profile_name(nm, sizeof(nm), "norm-ffn", il);
+      KNJ_PROFILE_OP(nm);
+      rmsnorm_rows(x_.data(), n, H, *w.ffn_norm, hx_.data());
+    }
     if (dbg && il == 0) dump_f32("07_ffn_norm", hx_.data(), (size_t)n * H);
 
     // The expert branch is a *residual* addition: llama.cpp computes
@@ -563,12 +595,20 @@ const float* Model::forward(const int32_t* tokens, int n) {
     // taken of. moe() must therefore write beside x_, never into it -- an
     // earlier version passed x_ as the output, and the `fill` that starts the
     // accumulation silently erased every layer's FFN residual.
-    moe(w, hx_.data(), n, ffn_out_.data());
+    {
+      profile_name(nm, sizeof(nm), "moe", il);
+      KNJ_PROFILE_OP(nm);
+      moe(w, hx_.data(), n, ffn_out_.data());
+    }
     if (dbg && il == 0) {
       dump_f32("08_router_logits", rlog_.data(), (size_t)n * g_.n_expert);
       dump_f32("09b_moe_out", ffn_out_.data(), (size_t)n * H);
     }
-    for (size_t i = 0, cnt = (size_t)n * H; i < cnt; ++i) x_[i] += ffn_out_[i];
+    {
+      profile_name(nm, sizeof(nm), "residual", il);
+      KNJ_PROFILE_OP(nm);
+      for (size_t i = 0, cnt = (size_t)n * H; i < cnt; ++i) x_[i] += ffn_out_[i];
+    }
     if (dbg) {
       char nm[32];
       std::snprintf(nm, sizeof(nm), "10_after_layer%02d", il);
@@ -577,9 +617,12 @@ const float* Model::forward(const int32_t* tokens, int n) {
   }
 
   // Only the last position's logits are needed by any caller here.
-  rmsnorm(x_.data() + (size_t)(n - 1) * H, *out_norm_, xn_.data(), H);
-  if (dbg) dump_f32("11_final_norm", xn_.data(), H);
-  matmul(*out_w_, xn_.data(), 1, H, logits_.data(), V);
+  {
+    KNJ_PROFILE_OP("head");
+    rmsnorm(x_.data() + (size_t)(n - 1) * H, *out_norm_, xn_.data(), H);
+    if (dbg) dump_f32("11_final_norm", xn_.data(), H);
+    matmul(*out_w_, xn_.data(), 1, H, logits_.data(), V);
+  }
   if (dbg) dump_f32("12_logits", logits_.data(), (size_t)V);
 
   pos_ += n;

@@ -252,7 +252,113 @@ The documented gate is `bash tools/bench/run_bench.sh`, expected exit 0. It was 
 - The per-request critical-path instrumentation above — unblocked by: adding the five timestamps to the driver's request record.
 - Whether the OneDrive-hosted model path inflates the read side in the FFN run (the probe's reads hit the page cache at 5.7 GiB/s, and 610 MiB of a 964 MiB file is re-read across 19 passes) — unblocked by: a cold-cache comparison against a copy of the file outside OneDrive.
 
+# Phase 41 — tier B census repaired, and the read side is not OneDrive-bound  ·  DONE
+
+**Believed at the time**  Two open items from Phase 40's gate re-verification: "tier B refuses **every** driver with `'hip/hip_runtime.h' file not found`, so it measures nothing at all", and "whether the OneDrive-hosted model path inflates the read side in the FFN run".
+
+**Decision**  (1) Tier B was refusing because of `-nogpuinc`, not because of the drivers; replace the census spelling with the one `AGENTS.md` §3 records as verified by hand. (2) Measure the OneDrive question with two independent instruments instead of reasoning about it: the isolated probe (read-only case, whole file) and the streaming driver's own `reader busy` field.
+
+**Changed**
+- `tools/bench/run_bench.sh` — tier B no longer passes `-nogpuinc`; it passes `--rocm-path=<ROCm root>`, `-I<tools/bench>`, `-I<repo>/kernels`, `-I<repo>`, and `-I<root>/include` **only** for rocWMMA drivers (the tier C rule: a rocWMMA flag must not leak into a driver that does not use it). Paths go through a new `winpath()` (`cygpath -m`) because the device clang is a native binary. `ROOT` is now defined once. The tier B header states why the tier used to measure nothing.
+- `src/profiler/`, `src/cli/`, `src/model/`, `CMakeLists.txt`, `docs/06-profiling.md` — see Phase 42.
+
+**Verified — tier B (two full gate runs, `/tmp/runbench2.out` before, `/tmp/runbench3.out` after)**
+
+| | before | after |
+|---|---|---|
+| `REFUSED 'hip/hip_runtime.h' file not found` | **26** (13 drivers x 2 arches) | 0 |
+| per-kernel resource records (`vgpr=`) | **0** | **65** |
+| `expect … PRESENT` (declared-instruction checks) | 0 | **7** |
+| `expect … MISSING` | 0 | 0 |
+| `EMPTY` (no device kernel) | 0 | 2 (`knj_xfer_probe`, both arches — correct: host-only probe) |
+| real refusals | 26 (all spurious) | **10, all on gfx1031 and all correct** |
+| gate exit code | 0 | 0 |
+
+The 10 refusals are the ones that should exist: 6 rocWMMA drivers answer `static assertion failed: Unsupported architecture` (gfx1031 has no WMMA) and 4 gfx12-builtin drivers answer `'__builtin_amdgcn_wmma_f32_16x16x16_f16_w32_gfx12' needs target feature`. **Zero refusals on gfx1201.** The census now emits per-kernel `vgpr/sgpr/scratch` and the instruction mix (fma / int_extract / other_vop / packed / dot / wmma) for every driver, and the declared-instruction checks run: `knj_gemm_w4a8 v_dot4_i32_i8 PRESENT`, `knj_gemm_w4a4 v_dot8_i32_i4 PRESENT`, `knj_gemm_wmma_f16 v_wmma_f32_16x16x16_f16 PRESENT`, `knj_gemm_wmma_bf16 v_wmma_f32_16x16x16_bf16 PRESENT`, `knj_gemm_simt_pk16 v_pk_fma_f16 PRESENT`. Tier B is the tier `AGENTS.md` calls "where an A/B claim becomes a measurement"; it had been empty.
+
+**Verified — the OneDrive read side (two instruments, hypothesis falsified)**
+
+Identical bytes first: `sha256 b12489c6…` and 964653184 bytes for both the OneDrive file and a copy under `%LOCALAPPDATA%\Temp`.
+
+Instrument 1 — `knj_xfer_probe`, read-only case, whole 964 MB file per case, 3 interleaved pairs, all `RESULT: PASS`:
+
+| pair | OneDrive | local temp |
+|---|---|---|
+| 1 | 7060.31 MiB/s | 5132.33 |
+| 2 | 6983.69 | 5869.90 |
+| 3 | 7045.21 | 5811.55 |
+| mean | **7029.7 MiB/s** | **5604.6 MiB/s** |
+
+Instrument 2 — the streaming driver's own reader thread (610.312 MiB over 336 reads per pass, `reader busy`), two full 19-pass runs, both `checks failed: 0`, both `RESULT: PASS`:
+
+| pass (M0…P1) | OneDrive reader busy | local temp |
+|---|---|---|
+| M0 | 121.647 ms | 154.036 ms |
+| M1 | 123.695 | 167.381 |
+| M2 | 131.996 | 182.853 |
+| M3 | 144.849 | 193.892 |
+| P0 | 133.033 | 175.274 |
+| P1 | 115.478 | 176.361 |
+| mean | **128.4 ms = 4.64 GiB/s** | **175.0 ms = 3.41 GiB/s** |
+
+**Verdict: falsified.** The OneDrive-hosted path is **not** a read-side penalty — it is faster than an identical copy in the local temp directory in both instruments (+25% isolated, +36% in-pipeline). The suspicion that the 0.15 GiB/s pipeline rate might be a filesystem artifact is therefore closed, and Phase 40's conclusion stands unchanged: the gap is coordination, not I/O and not bandwidth. The cause of the OneDrive advantage is **not** established and is not investigated further, because it favours the configuration in use.
+
+**Still open**
+- The cold-cache half of this comparison is **REFUSED**: dropping the Windows file cache needs elevation, so both instruments measured the warm/page-cache regime. Every number above says so.
+- `tools/bench/run_bench.sh` tier B **reports but does not gate**: a `MISSING` declared instruction prints `<-- OK? cell` and does not affect the exit code. There were none this run, so the tier is honest today; it is not enforced. Unblocked by: making a `MISSING` set the tier B failure path.
+- The OneDrive-vs-local advantage above is unexplained (reported, not claimed).
+
+# Phase 42 — C21 profiling: built, wired, and measured  ·  DONE
+
+**Believed at the time**  `docs/06-profiling.md` opened with "STATUS: spec, not yet built. No `kanjoos` binary exists; nothing in this document has ever run", and that was still true in the strict sense that matters most: `src/cli/main.cpp` parsed none of the documented flags, and **the root build referenced none of `src/cli`, `src/model`, `src/loader`, `src/tokenizer`, `src/util`, `src/platform` or `src/profiler`** — the repository could not produce a single executable that loads a model. The user's instruction was explicit: "we need to have profiling etc.".
+
+**Decision**  Implement the C21 core for the parts that can be measured honestly on the path that exists, put it behind the documented flag surface, and make the build produce the binary. Where the contract cannot be met yet, refuse the flag rather than redefine it.
+
+**Changed**
+- `src/profiler/profiler.{h,cpp}` — new. Marker stack, per-stream idle walk, `--profile-floor` (empty ops through the identical begin/end path), `--profile-warmup`, `--profile-detail=class|layer|kernel`, `--profiling=table|json|csv|no-subtract|off`, `--profile-dir` writing `profile.{txt,json,csv}`, residency and transfer footers, and a declared `ClockDomain` so a host-only run says `clock host` instead of printing device zeros. `counters` and `full` are **refused with a message**, not aliased. `src/platform/memprobe.h` feeds the header's RAM lines.
+- `src/cli/main.cpp` — parses the flags, configures the profiler before `load`, measures the floor, scopes `load`/`tokenize`/`prefill`/`decode`/`sample`, calls `step_done()` per forward, and reports once at every exit (including the `--bench` early return).
+- `src/model/model.cpp` — scopes `embed`, and per layer `norm`, `qkv`, `attention`, `attn-o`, `norm-ffn`, `moe`, `residual`, plus `head`. Names are `class:layer`, so one instrumentation pass serves class and layer detail.
+- `CMakeLists.txt` — new `knj_runtime` static library and `kanjoos-run` executable (host-only ISO C++17, `Threads::Threads`). **`KNJ_ARCH` now defaults to `gfx1201`**, the stated first target; `gfx1031` remains fully supported via `-DKNJ_ARCH=gfx1031`. The stale header comment claiming gfx1031 primary is corrected in the same edit.
+- `src/loader/gguf.cpp` — `NOMINMAX` / `WIN32_LEAN_AND_MEAN` guarded with `#ifndef` (MinGW's own headers define them; the unguarded redefine was a warning on every build).
+- `docs/06-profiling.md` — STATUS rewritten to state exactly what exists and what does not; the section 2 block is now labelled as still containing no measurements.
+
+**Verified**
+
+```sh
+cmake -S . -B build/cmake-host -G Ninja -DKNJ_ENABLE_DEVICE=OFF -DCMAKE_CXX_COMPILER=g++ -DCMAKE_BUILD_TYPE=Release   # rc 0
+cmake --build build/cmake-host --target kanjoos-run -j 8                                                              # rc 0, 10/10, 0 warnings
+./build/cmake-host/kanjoos-run.exe --model <Qwen3-MOE-4x0.6B-Q4_K_M.gguf> --bench 16 8 --profiling --profile-dir <dir>
+  -> rc 0, table printed, profile.{txt,json,csv} written
+```
+
+Also verified, each on the built artifact: `--profiling=json` writes a **valid** JSON file (parsed by `python -m json.tool`) and prints the same to stdout; `--profiling=csv` rows read `moe,448,1315813400,0,1315813400,host,class,94`; `--profile-detail=layer` prints 84 per-layer rows (`moe:0`, `head:0`, …); `--profiling=no-subtract` prints the floor line **and** the "floor is NOT removed" note; `--profiling=off` prints no table (grep for the column header: 0 matches); `--profiling=full` **refuses**, exit 1, `--profiling=full is not implemented; this build implements off|table|json|csv|no-subtract`.
+
+**Measurements — first real C21 table on this machine (MEASURED)**  `--bench 16 8 --profiling --profile-warmup 2`, Qwen3-MoE-4x0.6B Q4_K_M, 28 layers, 4 experts, ctx 2048, 32 threads:
+
+| component | ops | %dev | dev us | idle us |
+|---|---|---|---|---|
+| moe | 616 | 57.2% | 1304656.00 | 0.00 |
+| qkv | 616 | 21.4% | 487532.50 | 0.00 |
+| head | 22 | 10.8% | 245891.52 | 0.00 |
+| attn-o | 616 | 8.1% | 185187.40 | 0.00 |
+| attention | 616 | 2.3% | 51563.70 | 0.00 |
+| norm | 616 | 0.1% | 1233.60 | 0.00 |
+| norm-ffn | 616 | 0.0% | 1117.80 | 0.00 |
+| embed | 22 | 0.0% | 32.52 | 0.00 |
+
+`616 = 22 kept steps x 28 layers`; the floor is **0.081 us** per empty op; `--profile-detail=layer` shows `moe:0 = 12560.75 us`. Rows are **self time**, so `prefill`/`decode` (the containers) report ~2 ms and the work appears on the leaves; the header states the convention in force.
+
+**Two defects found and fixed during verification, both by reading the output rather than trusting the design**
+1. The first run printed `nested scopes are not measured: 4752 ignored` — the CLI's `prefill`/`decode` scope wrapped the model's per-component scopes and **every useful row was discarded**. Fixed by making the profiler a marker *stack* that reports self time (child time subtracted), so nested rows are recorded and the rows partition the run instead of double-counting it.
+2. `--profile-dir` was created with `std::system("mkdir -p …")`, which on Windows runs under `cmd.exe`, whose `mkdir` treats `-p` as a **directory name**: the run appeared to succeed while creating a junk directory literally called `-p` in the working directory. Fixed with `std::filesystem::create_directories`; verified afterwards that `./-p` is no longer created and the three profile files are written.
+
+**Still open**
+- No device event backend: on the host path `dev` and `host` are the same interval by construction, and every report says so. A device path that reports into the same table is what makes the column separation real. Unblocked by: a HIP event begin/end in `src/device/` and a `ClockDomain::Device` run.
+- `residency` and `transfer` footers print `NOT MEASURED on this path`; the streaming driver has those numbers (slots, evictions, prefetch hit, h2d/d2h bytes) but does not report through C21 yet.
+- `--profiling=counters` and `=full` remain unimplemented **and refused**; `kanjoos serve` does not exist.
+
 **Notes**
+- The hand-built verification binary needs `-static` (MinGW): without it the exe depends on `libstdc++-6.dll` / `libgcc_s_seh-1.dll` and exits **127** from a shell that does not have Strawberry's `bin` on `PATH`. The CMake target does not have this problem when run from the toolchain environment, but a stripped-down shell can reproduce it.
 - `q4k_stream_ffn.hip` includes `rocwmma/rocwmma.hpp` and therefore needs `-std=c++17` on the hipcc line (rocWMMA header need, not a preference); the `-I .` is required so `#include "src/residency/residency.h"` resolves; `src/residency/residency.cpp` must be on the hipcc link line (`lld-link` otherwise reports undefined `knj::ResidencyManager::*`).
 - `run_on_rc` / `run_off_rc` are captured via `set -o pipefail` and `${PIPESTATUS[0]}` so a filtered output never masks the runner's real exit code.
 - Temp artifacts (`/tmp/ksfp_on.exe`, `/tmp/ksfp_off.exe`, `/tmp/ksfp_on.out`, `/tmp/ksfp_off.out`, `/tmp/ksfp_on_out/`, `/tmp/ksfp_off_out/`) were deleted after capture; the numbers above are the extracted record.
