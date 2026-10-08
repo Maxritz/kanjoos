@@ -1315,6 +1315,11 @@ int main(int argc, char **argv) {
         uint64_t host_sync_ns = 0, host_d2h_dy_ns = 0, host_d2h_gate_ns = 0,
                  host_d2h_up_ns = 0, host_silu_ns = 0, host_fuse_launch_ns = 0,
                  host_h2d_da_ns = 0, host_bitgate_ns = 0, host_other_ns = 0;
+        // Phase 38 traps: the untimed host work that used to hide inside `other`.
+        //   fill    = the sentinel assign() of Ys / Gs / Us  (harness setup)
+        //   bits    = the bits_bad full-array I7 scans
+        //   actgate = the fuse-activation compare loop (its D2H stays in bitgate)
+        uint64_t host_fill_ns = 0, host_bits_ns = 0, host_actgate_ns = 0;
         bool bits_ok = true, carry_ok = true;
         int first_bad = -1;
         uint64_t demand_hits = 0, demand_total = 0;
@@ -1417,7 +1422,12 @@ int main(int argc, char **argv) {
         uint64_t host_d2h_gate_ns = 0, host_d2h_up_ns = 0, host_d2h_dy_ns = 0;
         uint64_t host_silu_ns = 0, host_fuse_launch_ns = 0, host_h2d_da_ns = 0;
         uint64_t host_bitgate_ns = 0, host_sync_ns = 0, host_other_ns = 0;
-        const bool use_fused_silu = false;  // fusion-ON baseline (fused kernel replaces host silu + H2D(dA))
+        uint64_t host_fill_ns = 0, host_bits_ns = 0, host_actgate_ns = 0;
+        // fusion-OFF is the default: the legacy host silu + H2D(dA) path, which is
+        // the one that passes the streamed-vs-resident BIT-IDENTITY gate. Set true
+        // for the fused-device path (a declared precision reduction, per the
+        // fuse-act gate below).
+        const bool use_fused_silu = false;
         uint64_t demand_hits = 0, demand_total = 0;
         uint64_t wait_ticks_total = 0, max_wait_ticks = 0, wait_ns_total = 0;
         int waited_items = 0;
@@ -1474,7 +1484,9 @@ int main(int argc, char **argv) {
                 host_sync_ns += mono_ns() - sh0;
             }
             if (L > 0) {   // layer L-1's down outputs are complete: capture them
+                const uint64_t f0 = mono_ns();
                 Ys[(size_t)L - 1].assign((size_t)Pr * KH, SENTINEL);
+                host_fill_ns += mono_ns() - f0;
                 {
                     const uint64_t sh0 = mono_ns();
                     HIPCHECK(hipMemcpy(Ys[(size_t)L - 1].data(), dY,
@@ -1482,13 +1494,22 @@ int main(int argc, char **argv) {
                     host_d2h_dy_ns += mono_ns() - sh0;
                 }
                 merge_stash(L - 1, 2, Ys[(size_t)L - 1]);
-                if (bitgate && bits_bad(Ys[(size_t)L - 1], refY[(size_t)L - 1], "down", L - 1)) {
-                    ss.bits_ok = false;
-                    if (ss.first_bad < 0) ss.first_bad = L - 1;
+                if (bitgate) {
+                    const uint64_t b0 = mono_ns();
+                    const bool bad = bits_bad(Ys[(size_t)L - 1], refY[(size_t)L - 1], "down", L - 1);
+                    host_bits_ns += mono_ns() - b0;
+                    if (bad) {
+                        ss.bits_ok = false;
+                        if (ss.first_bad < 0) ss.first_bad = L - 1;
+                    }
                 }
             }
-            Gs[(size_t)L].assign((size_t)Pr * KF, SENTINEL);
-            Us[(size_t)L].assign((size_t)Pr * KF, SENTINEL);
+            {
+                const uint64_t f0 = mono_ns();
+                Gs[(size_t)L].assign((size_t)Pr * KF, SENTINEL);
+                Us[(size_t)L].assign((size_t)Pr * KF, SENTINEL);
+                host_fill_ns += mono_ns() - f0;
+            }
             {
                 const uint64_t sh0 = mono_ns();
                 HIPCHECK(hipMemcpy(Gs[(size_t)L].data(), dG, Gs[(size_t)L].size() * sizeof(float), hipMemcpyDeviceToHost));
@@ -1501,10 +1522,15 @@ int main(int argc, char **argv) {
             }
             merge_stash(L, 0, Gs[(size_t)L]);
             merge_stash(L, 1, Us[(size_t)L]);
-            if (bitgate && (bits_bad(Gs[(size_t)L], refG[(size_t)L], "gate", L) ||
-                            bits_bad(Us[(size_t)L], refU[(size_t)L], "up", L))) {
-                ss.bits_ok = false;
-                if (ss.first_bad < 0) ss.first_bad = L;
+            if (bitgate) {
+                const uint64_t b0 = mono_ns();
+                const bool bad = bits_bad(Gs[(size_t)L], refG[(size_t)L], "gate", L) ||
+                                 bits_bad(Us[(size_t)L], refU[(size_t)L], "up", L);
+                host_bits_ns += mono_ns() - b0;
+                if (bad) {
+                    ss.bits_ok = false;
+                    if (ss.first_bad < 0) ss.first_bad = L;
+                }
             }
             // Build the host-side reference activation (knj_silu_mul, host std::exp)
             // so the fused-device output can be diffed bit-for-bit against it. This is
@@ -1560,6 +1586,7 @@ int main(int argc, char **argv) {
                 HIPCHECK(hipMemcpy(ad.data(), dA, ad.size() * sizeof(__half),
                                    hipMemcpyDeviceToHost));
                 host_bitgate_ns += mono_ns() - sh0;
+                const uint64_t g0 = mono_ns();
                 int un = 0, bad = 0;
                 double wa = 0.0, wr = 0.0;
                 int wb = -1;
@@ -1574,6 +1601,7 @@ int main(int argc, char **argv) {
                     wr = std::fmax(wr, d / rm);
                     if (d > 0.0f) { ++bad; if (d > wd) { wd = d; wb = i; wgh = gh; wrh = rh; } }
                 }
+                host_actgate_ns += mono_ns() - g0;
                 printf("  fuse-act L%d: dA-vs-host bits identical=%s differing=%d/%d "
                        "max-abs=%.3e rel-rmse-max=%.3e unwritten=%d",
                        L, bad == 0 ? "yes" : "no", bad, na, wa, wr, un);
@@ -2202,6 +2230,9 @@ int main(int argc, char **argv) {
         ss.host_fuse_launch_ns = host_fuse_launch_ns;
         ss.host_h2d_da_ns = host_h2d_da_ns;
         ss.host_bitgate_ns = host_bitgate_ns;
+        ss.host_fill_ns = host_fill_ns;
+        ss.host_bits_ns = host_bits_ns;
+        ss.host_actgate_ns = host_actgate_ns;
         ss.host_other_ns = host_other_ns;
         ss.demand_hits = demand_hits;
         ss.demand_total = demand_total;
@@ -2257,10 +2288,16 @@ int main(int argc, char **argv) {
             const float fuse = (float)((double)ss.host_fuse_launch_ns / 1e6);
             const float h2dda = (float)((double)ss.host_h2d_da_ns / 1e6);
             const float bitg = (float)((double)ss.host_bitgate_ns / 1e6);
-            const float other = (float)((double)ss.host_ms - sync - dy - gate - up - silu - fuse - h2dda - bitg);
+            const float fill = (float)((double)ss.host_fill_ns / 1e6);
+            const float bits = (float)((double)ss.host_bits_ns / 1e6);
+            const float actg = (float)((double)ss.host_actgate_ns / 1e6);
+            const float other = (float)((double)ss.host_ms - sync - dy - gate - up - silu - fuse
+                                        - h2dda - bitg - fill - bits - actg);
             printf("  host-critical breakdown ms: sync %.3f + d2h_down %.3f + d2h_gate %.3f + d2h_up %.3f "
-                   "+ silu %.3f + fuse %.3f + h2d_da %.3f + bitgate %.3f + other %.3f = %.3f\n",
-                   sync, dy, gate, up, silu, fuse, h2dda, bitg, other, (double)ss.host_ms);
+                   "+ silu %.3f + fuse %.3f + h2d_da %.3f + bitgate %.3f"
+                   " + fill %.3f + bits %.3f + actgate %.3f + other %.3f = %.3f\n",
+                   sync, dy, gate, up, silu, fuse, h2dda, bitg, fill, bits, actg, other,
+                   (double)ss.host_ms);
         }
         printf("\n");
         printf("  reads %llu (%.3f MiB, reader busy %.3f ms)  h2d %llu (%.3f ms)  pin %.3f ms\n",
