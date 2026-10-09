@@ -1,0 +1,4 @@
+blk.51.ffn_down.weight       n= 89128960 exact= 89128960/89128960  maxabs=0.000000e+00 maxrel=0.000e+00 worst_idx=0 engine=-0.002097 ref=-0.002097
+blk.55.ffn_down.weight       n= 89128960 exact= 89128960/89128960  maxabs=0.000000e+00 maxrel=0.000e+00 worst_idx=0 engine=0.001739 ref=0.001739
+
+AGREE

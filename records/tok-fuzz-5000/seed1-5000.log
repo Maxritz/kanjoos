@@ -1,0 +1,114 @@
+
+===== seed 1, 5000 prompts, 2de59521cd6de20b48bad8cb =====
+model=C:/Users/rr/OneDrive/Desktop/kraken/models/Qwen3-MOE-4x0.6B-2.4B-Q4_K_M.gguf
+llama_tokenize=C:/Users/rr/OneDrive/Desktop/dxl/llama.cpp/build/bin/llama-tokenize.exe
+engine=C:/Users/rr/OneDrive/Desktop/Kanjoos/build/cmake-host/kanjoos-run.exe
+KNJ_TOK_MODEL=C:/Users/rr/OneDrive/Desktop/kraken/models/Qwen3-MOE-4x0.6B-2.4B-Q4_K_M.gguf
+KNJ_LLAMA_TOKENIZE=C:/Users/rr/OneDrive/Desktop/dxl/llama.cpp/build/bin/llama-tokenize.exe
+KNJ_ENGINE=C:/Users/rr/OneDrive/Desktop/Kanjoos/build/cmake-host/kanjoos-run.exe
+fuzz_seed=1  per_seed=5000
+
+engine        : C:/Users/rr/OneDrive/Desktop/Kanjoos/build/cmake-host/kanjoos-run.exe
+llama.cpp     : C:/Users/rr/OneDrive/Desktop/dxl/llama.cpp/build/bin/llama-tokenize.exe
+model         : C:/Users/rr/OneDrive/Desktop/kraken/models/Qwen3-MOE-4x0.6B-2.4B-Q4_K_M.gguf
+strings       : 32 (each written to a file and read with --prompt-file / -f)
+engine ids    : `--dump-tokens -n 0` (`prompt ids :`) or the qwen35 probe's `id(s):`, whichever this architecture prints
+
+string                                        engine   llama   llama  verdict
+                                                 ids   parse     raw  
+The capital of France is                           5       5       5  PASS
+hello world                                        2       2       2  PASS
+1 2 3 123 1234 3.14159 -0.5                       26      26      26  PASS
+  leading and   multiple    spaces                 7       7       7  PASS
+line1\nline2\n\nline3                              8       8       8  PASS
+æ—¥æœ¬èªžã�®ãƒ†ã‚­ã‚¹ãƒˆ                                           6       6       6  PASS
+emoji: ðŸš€ðŸ”¥                                          6       6       6  PASS
+tab\there <|endoftext|>                            9       5       9  POLICY: matches --no-parse-special only; the engine does not parse control tokens
+abc123def 0.5e-3 7zip A1B2C3                      21      21      21  PASS
+don't  it's  can't've  l'Ã©tÃ©                      13      13      13  PASS
+!!!!  ...  ---  ;;  (((                            9       9       9  PASS
+{ "key": [1,2,3], "n": null }                     16      16      16  PASS
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...         8       8       8  PASS
+supercalifragilisticexpialidocious anti...        17      17      17  PASS
+mixed  mixed\tmixed\nmixed ðŸ˜€ mixed                 9       9       9  PASS
+aðŸš€b                                                3       3       3  PASS
+aâ€”b                                                3       3       3  PASS
+10â€“20                                              5       5       5  PASS
+æ—¥æœ¬èªžã€�ã�§ã�™                                             4       4       4  PASS
+aÂ b                                                3       3       3  PASS
+hÃ©lloâ€¦world                                        5       5       5  PASS
+â‚¬100 Â£5                                            6       6       6  PASS
+emojiðŸš€fireðŸ”¥                                        4       4       4  PASS
+ÃœnÃ¯cÃ¶dÃ© tÃ¨xt                                       9       9       9  PASS
+xâ€‰y                                                4       4       4  PASS
+eÌ�x                                                3       3       3  PASS
+cafeÌ� au lait                                      6       6       6  PASS
+aÌˆÌ�b                                               5       5       5  PASS
+nÌƒa                                                4       4       4  PASS
+à¸�à¸´à¸™                                                2       2       2  PASS
+à¤•à¤¿à¤¸                                                3       3       3  PASS
+Ø§ÙŽØ¨                                                3       3       3  PASS
+Ã¨Ã£Ã¯                                                3       3       3  PASS
+Ã¿Ã¾                                                 2       2       2  PASS
+Ã�Ã˜                                                 2       2       2  PASS
+ï¿½ï¿½ï¿½                                                1       1       1  PASS
+|=k-H#"#se!Pw;V|#c<X_f=L=v<ZE"Ugr,7               24      24      24  PASS
+ï¿½ï¿½                                                 1       1       1  PASS
+Ã›ÃŒ                                                 2       2       2  PASS
+ï¿½ï¿½                                                 1       1       1  PASS
+ï¿½ï¿½                                                 1       1       1  PASS
+ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½                                           2       2       2  PASS
+ï¿½ï¿½ï¿½                                                1       1       1  PASS
+                                               4       4       4  PASS
+ï¿½ï¿½ï¿½ï¿½                                               1       1       1  PASS
+Â©Ã¤ÃžÃ½Â‡Ã¸Â‹ÃŽÃ¤Â«Â«ÂºÂƒÂ³                                    17      17      17  PASS
+                                                  1       1       1  PASS
+ï¿½ï¿½ï¿½ï¿½                                               1       1       1  PASS
+Ã¾Ã¿                                                 2       2       2  PASS
+Ã­Ã¡Ã¯                                                3       3       3  PASS
+ï¿½ï¿½ï¿½ï¿½                                               1       1       1  PASS
+Â¾Â­ÂµÂ¬                                               4       4       4  PASS
+l#=q6fj7+f@$v)*"Y!C?B.o7LE(54@c5tBr{EZy...        47      47      47  PASS
+$|4Yz`vVe<pxbY<cs#R                               16      16      16  PASS
+ï¿½ï¿½ï¿½                                                1       1       1  PASS
+ï¿½ï¿½ï¿½                                                1       1       1  PASS
+
+                                                3       3       3  PASS
+ÃŒÂ¨ÃªÃ€Â¡Â‚Â‰Â·ÃµÂ«                                        12      12      12  PASS
+
+                                               4       4       4  PASS
+Â�Â±Â¥Â¿                                               5       5       5  PASS
+D"49Ih1KV;Bv,PfLwd^d>(|%*155d;BJl`@OKK....        41      41      41  PASS
+ï¿½ï¿½ï¿½                                                1       1       1  PASS
+ÃªÃ£Ã¬                                                3       3       3  PASS
+Â”Ã„Ã�Ã‹Â�ÃµÃ†Â›Â‹Ã‹ÂƒÂƒÂ—Ã©Â�ÂŠÂ°Â½Ã«Â©Â�Ã³ÂªÂ½Â¨ÂšÃ¯Ã Ã‹Ã€ÃºÃ�Â™ÂµÃ‘ÂŠÂ†             51      51      51  PASS
+YRHS((HlZ.@;oex\tMA7e:G9?N*C+Y+sirK=QG%I7         32      32      32  PASS
+ï¿½ï¿½ï¿½                                                1       1       1  PASS
+ï¿½ï¿½                                                 1       1       1  PASS
+                                                  1       1       1  PASS
+Â…Â¾Ã¦Â’Ã„Â’Â“Â…Â‚ÃŠÃ›Ã¾Ã¸Â§Â™                                   20      20      20  PASS
+ï¿½ï¿½ï¿½                                                1       1       1  PASS
+Â¦Â¤Ã‘ÃŽÂ›Ã‹Â Â´Â¤ÂˆÃ�Â´                                      14      14      14  PASS
+Ã³Ã´Ã±Ã°                                               4       4       4  PASS
+                                                  1       1       1  PASS
+Ã¿Ã¿                                                 2       2       2  PASS
+Ã¿                                                  1       1       1  PASS
+ï¿½ï¿½ï¿½                                                1       1       1  PASS
+Ã³Ã°Ã³Ã´                                               4       4       4  PASS
+j1k01ACRhS6n                                      10      10      10  PASS
+Â�Â­Ã‘Ã°Â¹Â½Ã�Ã¾ÃºÂ¹Ã©Ã–Ã†Â¸ÂŒÂ’ÃžÂ¨Â´Ã�ÃŒÃŒÃŸÂªÃ¶Â•ÂŸÃ Â­Â§Ã€Ã­                  36      36      36  PASS
+Â¿                                                  1       1       1  PASS
+ï¿½ï¿½ï¿½                                                1       1       1  PASS
+ï¿½ï¿½ï¿½ï¿½                                               1       1       1  PASS
+ï¿½ï¿½ï¿½                                                1       1       1  PASS
+Ã´Ã°Ã²Ã°                                               4       4       4  PASS
+echo Â•Â£Â”Ã±Â½Ã¡Ã®Ã¥ÂªÃ“Ã°Â Ã¼Â¶ÂžÃ®Ã¨ÂžÃ‹Ã‡Â¿Ã Â�Â°Ã°Â…Â‡Â¾Ã‚Â´Â¬ÃˆÂ¥Â³...        61      61      61  PASS
+Ã’Ãˆ                                                 2       2       2  PASS
+Ã¯Ã›Ã’Â€ÂŸÃ±Ã³Ã™ÃŽÃ¦Ã–Ã¾ÂœÃ Ã¡Â´Â€Ã‡Â²Ã¶Ã¨ÃŽÂ«Ã³Â²ÃœÂ€Ã£Ã­Ã§Ã–Â‘Ã¾Â¿ÃŠÂ…Ã¨Â§Ã¥Ã…          43      43      43  PASS
+Ã´Ã°Ã²Ã²                                               4       4       4  PASS
+ï¿½ï¿½ï¿½                                                1       1       1  PASS
+ï¿½ï¿½                                                 1       1       1  PASS
+Ã¨Ã¯Ã¥                                                3       3       3  PASS
+Ã¿                                                  1       1       1  PASS
+Ã„Ã–                                                 2       2       2  PASS
+rc=143

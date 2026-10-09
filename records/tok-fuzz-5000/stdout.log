@@ -1,0 +1,9 @@
+seed 1: logging to C:\Users\rr\OneDrive\Desktop\Kanjoos\records\tok-fuzz-5000\seed1-5000.log
+Traceback (most recent call last):
+  File "C:\Users\rr\OneDrive\Desktop\Kanjoos\tools\tok_fuzz_campaign.py", line 147, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "C:\Users\rr\OneDrive\Desktop\Kanjoos\tools\tok_fuzz_campaign.py", line 120, in main
+    print(f"seed {seed}: ok={ok} boundary={boundary} policy={policy} tokens={tokens}")
+                             ^^
+UnboundLocalError: cannot access local variable 'ok' where it is not associated with a value

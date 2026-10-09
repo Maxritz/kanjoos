@@ -1,0 +1,13 @@
+oracle: dequant F32    output_norm.weight           identical
+oracle: dequant Q4_0   blk.64.attn_k.weight         identical
+oracle: dequant Q8_0   blk.0.attn_gate.weight       identical
+oracle: dequant Q4_K   token_embd.weight            identical
+oracle: dequant Q5_K   blk.51.ffn_down.weight       identical
+oracle: dequant Q6_K   output.weight                identical
+oracle: wrote 131 vector(s) for trunk forward pass 0 (2 token step(s)) into records/qwen35-probe-2026-10-08/trunk2
+oracle: trunk            64 causal layer(s) = block_count 65 - nextn_predict_layers 1; blk.64 carries the MTP tensors and is NOT in the main pass
+oracle: trunk kinds      48 recurrent (SSM) + 16 full attention
+oracle: ffn              dense SwiGLU, no router: down(silu(gate(x)) * up(x)), x = the post_attention_norm output
+oracle: head             output_norm + output.weight [5120, 248320] (untied), no scaling, no softcap
+oracle: trunk argmax     per position: [61748, 5581]
+oracle rc=0

@@ -1,0 +1,89 @@
+== kanjoos qwen35 probe ==========================================
+model      : G:/More-models/ThinkingCap-Qwen3.8-27B-Q4_K_M.gguf
+container  : GGUF v3, 866 tensors, 50 metadata entries, 16.245 GiB
+loaded     : 191.1 ms (mapped; nothing dequantized)
+
+-- geometry, from the file's own metadata --
+  layers         65   (48 recurrent/SSM + 17 full attention, interval 4)
+  hidden        5120   ff 17408, vocab 248320, ctx_train 262144
+  attention     24 heads equivalent: 24 q / 4 kv, head_dim 256 (q_dim 6144, kv_dim 1024)
+  rope          base 10000000, 64 of 256 dims rotated
+  ssm           inner 6144, state 128, groups 16, dt_rank 48, conv_kernel 4 -> conv_dim 10240
+  rms_eps       1e-06
+  nextn (MTP)   1 merged layer(s)
+  layer kinds   SSSASSSASSSASSSASSSASSSASSSASSSASSSASSSASSSASSSASSSASSSASSSASSSAA  (S = recurrent/SSM, A = full attention)
+  kinds source  attention.recurrent_layers (per-layer, exact)
+  conv_dim      10240 == 2 * groups(16) * state(128) + inner(6144)
+
+-- tokenizer --
+  vocab 248320, bos 248044, eos 248046, add_bos 0, chat_template present
+  round-trip (decode(encode(s)) == s):
+    ok   n=5    "The capital of France is"
+    ok   n=2    "hello world"
+    ok   n=26   "1 2 3 123 1234 3.14159 -0.5"
+    ok   n=7    "  leading and   multiple    spaces"
+    ok   n=8    "line1
+line2
+
+line3"
+    ok   n=24   "日本語のテキスト"
+    ok   n=11   "emoji: 🚀🔥"
+    ok   n=18   "tab	here <|endoftext|>"
+    ok   n=0    ""
+  9/9 round-trips exact
+  probe text "The capital of France is" -> 5 id(s): 760 6511 314 9338 369
+
+-- tensor binding --
+  866 tensor(s) bound and shape-checked across 65 layer(s) (48 recurrent, 17 attention, 4 nextn); 0 not usable
+  nextn: 4 tensor(s) on blk.64
+  every tensor is present with the implied shape
+
+-- quantisation coverage (all 866 tensors) --
+  F32       456 tensor(s)  decodable
+  Q4_0        8 tensor(s)  decodable
+  Q4_K      257 tensor(s)  decodable
+  Q5_K        2 tensor(s)  decodable
+  Q6_K       79 tensor(s)  decodable
+  Q8_0       64 tensor(s)  decodable
+
+-- layer 0 (recurrent / SSM) --
+  tokens probed : 5 of 5 in the text
+  computed      : norm + attn_qkv + attn_gate for each token in 408.3 ms
+  projections   : 10 vector(s) computed
+
+-- full-output comparison vs records/qwen35-probe-2026-10-08/layer0 (rtol 2e-03 of reference RMS) --
+  vector                  n      max_abs     rel_rmse   zeros  unwritten   mismatch  verdict
+  embed_760            5120    0.000e+00    0.000e+00       0          0          0  PASS
+  xnorm_760            5120    0.000e+00    0.000e+00       0          0          0  PASS
+  qkv_760             10240    1.907e-05    2.198e-07       0          0          0  PASS
+  gate_760             6144    5.722e-06    2.921e-07       0          0          0  PASS
+  embed_6511           5120    0.000e+00    0.000e+00       0          0          0  PASS
+  xnorm_6511           5120    0.000e+00    0.000e+00       0          0          0  PASS
+  qkv_6511            10240    1.335e-05    2.763e-07       0          0          0  PASS
+  gate_6511            6144    4.768e-06    3.341e-07       0          0          0  PASS
+  embed_314            5120    0.000e+00    0.000e+00      31          0          0  PASS
+  xnorm_314            5120    0.000e+00    0.000e+00      31          0          0  PASS
+  qkv_314             10240    2.289e-05    2.380e-07       0          0          0  PASS
+  gate_314             6144    5.722e-06    2.494e-07       0          0          0  PASS
+  embed_9338           5120    0.000e+00    0.000e+00       0          0          0  PASS
+  xnorm_9338           5120    0.000e+00    0.000e+00       0          0          0  PASS
+  qkv_9338            10240    1.717e-05    2.659e-07       0          0          0  PASS
+  gate_9338            6144    5.722e-06    3.327e-07       0          0          0  PASS
+  embed_369            5120    0.000e+00    0.000e+00      31          0          0  PASS
+  xnorm_369            5120    0.000e+00    0.000e+00      31          0          0  PASS
+  qkv_369             10240    1.907e-05    2.231e-07       0          0          0  PASS
+  gate_369             6144    9.537e-06    2.612e-07       0          0          0  PASS
+  20 vector(s) verified element-by-element, 0 failed, 0 without a
+  reference in records/qwen35-probe-2026-10-08/layer0 (regenerate it with tools/ref_qwen35.py for the same
+  token ids and layer)
+
+-- NOT IMPLEMENTED (this is the honest end of the probe) --
+  1. the GatedDeltaNet recurrence (48 layers): conv1d state carry over 4 taps, the per-group delta rule over state_size 128 x 16 groups, and the alpha/beta/ssm_a gating
+  2. the gated full attention (17 layers): the q/gate split of attn_q, QK-norm over head_dim 256, and sectioned RoPE (64 of 256 dims, base 10000000)
+  3. the dense FFN (65 layers): ffn_gate/ffn_up/ffn_down with SiLU, no router
+  4. the vocabulary head: output_norm + output.weight [5120, 248320], so no logits can be produced
+  5. the merged nextn MTP head (1 layer, block 64): the eh_proj fusion of [hidden, embedding] C20 asks for
+
+RESULT: qwen35 front end verified (metadata, binding, tokenizer, embeddings,
+        layer 0 input projections against an independent oracle); the trunk and the head are REFUSED.
+        No logits are produced by this path.

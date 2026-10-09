@@ -1,0 +1,99 @@
+== kanjoos qwen35 probe ==========================================
+model      : G:/More-models/Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp.gguf
+container  : GGUF v3, 866 tensors, 53 metadata entries, 11.288 GiB
+loaded     : 135.9 ms (mapped; nothing dequantized)
+
+-- geometry, from the file's own metadata --
+  layers         65   (49 recurrent/SSM + 16 full attention, interval 4)
+  hidden        5120   ff 17408, vocab 248320, ctx_train 262144
+  attention     24 heads equivalent: 24 q / 4 kv, head_dim 256 (q_dim 6144, kv_dim 1024)
+  rope          base 10000000, 64 of 256 dims rotated
+  ssm           inner 6144, state 128, groups 16, dt_rank 48, conv_kernel 4 -> conv_dim 10240
+  rms_eps       1e-06
+  nextn (MTP)   1 merged layer(s)
+  layer kinds   SSSASSSASSSASSSASSSASSSASSSASSSASSSASSSASSSASSSASSSASSSASSSASSSAS  (S = recurrent/SSM, A = full attention)
+  kinds source  DERIVED from full_attention_interval — this file does not carry the per-layer array
+  conv_dim      10240 == 2 * groups(16) * state(128) + inner(6144)
+
+-- tokenizer --
+  vocab 248320, bos 248044, eos 248046, add_bos 0, chat_template present
+  round-trip (decode(encode(s)) == s):
+    ok   n=5    "The capital of France is"
+    ok   n=2    "hello world"
+    ok   n=26   "1 2 3 123 1234 3.14159 -0.5"
+    ok   n=7    "  leading and   multiple    spaces"
+    ok   n=8    "line1
+line2
+
+line3"
+    ok   n=24   "日本語のテキスト"
+    ok   n=11   "emoji: 🚀🔥"
+    ok   n=18   "tab	here <|endoftext|>"
+    ok   n=0    ""
+  9/9 round-trips exact
+  probe text "The capital of France is" -> 5 id(s): 760 6511 314 9338 369
+
+-- tensor binding --
+  869 tensor(s) bound and shape-checked across 65 layer(s) (49 recurrent, 16 attention, 4 nextn); 372 not usable
+  nextn: 4 tensor(s) on blk.64
+  NOT USABLE:
+    token_embd.weight                            type IQ2_S has no decoder
+    blk.0.ffn_gate.weight                        type IQ2_XS has no decoder
+    blk.0.ffn_up.weight                          type IQ2_XXS has no decoder
+    blk.0.ffn_down.weight                        type IQ2_S has no decoder
+    blk.0.attn_qkv.weight                        type IQ4_XS has no decoder
+    blk.0.attn_gate.weight                       type IQ4_XS has no decoder
+    blk.0.ssm_out.weight                         type IQ4_XS has no decoder
+    blk.1.ffn_gate.weight                        type IQ2_XS has no decoder
+    blk.1.ffn_up.weight                          type IQ2_XXS has no decoder
+    blk.1.ffn_down.weight                        type IQ3_S has no decoder
+    blk.1.attn_qkv.weight                        type IQ3_S has no decoder
+    blk.1.attn_gate.weight                       type IQ3_XXS has no decoder
+    blk.2.ffn_gate.weight                        type IQ3_XXS has no decoder
+    blk.2.ffn_up.weight                          type IQ3_S has no decoder
+    blk.2.ffn_down.weight                        type IQ3_S has no decoder
+    blk.2.attn_qkv.weight                        type IQ3_XXS has no decoder
+    blk.2.attn_gate.weight                       type IQ3_S has no decoder
+    blk.2.ssm_out.weight                         type IQ4_XS has no decoder
+    blk.3.ffn_gate.weight                        type IQ3_XXS has no decoder
+    blk.3.ffn_up.weight                          type IQ3_XXS has no decoder
+    blk.3.ffn_down.weight                        type IQ3_S has no decoder
+    blk.3.attn_q.weight                          type IQ2_XXS has no decoder
+    blk.3.attn_k.weight                          type IQ3_S has no decoder
+    blk.3.attn_v.weight                          type IQ3_S has no decoder
+    ... (and more; the counts above are the full picture)
+
+-- quantisation coverage (all 866 tensors) --
+  BF16       96 tensor(s)  decodable
+  F32       360 tensor(s)  decodable
+  IQ1_M       1 tensor(s)  NO DECODER IN THIS ENGINE
+  IQ2_S      17 tensor(s)  NO DECODER IN THIS ENGINE
+  IQ2_XS      9 tensor(s)  NO DECODER IN THIS ENGINE
+  IQ2_XXS     5 tensor(s)  NO DECODER IN THIS ENGINE
+  IQ3_S     144 tensor(s)  NO DECODER IN THIS ENGINE
+  IQ3_XXS    78 tensor(s)  NO DECODER IN THIS ENGINE
+  IQ4_XS     96 tensor(s)  NO DECODER IN THIS ENGINE
+  Q2_K       13 tensor(s)  NO DECODER IN THIS ENGINE
+  Q4_K       39 tensor(s)  decodable
+  Q6_K        8 tensor(s)  decodable
+  -> 363 tensor(s) cannot be decoded here; the trunk cannot run
+     on this file even once the recurrence exists.
+
+-- layer 0 (recurrent / SSM) --
+
+  PROBE STOPPED at layer 0: qwen35: token_embd.weight is IQ2_S, which this engine cannot decode
+  (nothing below it was computed or compared)
+
+-- no oracle comparison requested (--qwen35-ref DIR) --
+
+-- NOT IMPLEMENTED (this is the honest end of the probe) --
+  1. the GatedDeltaNet recurrence (49 layers): conv1d state carry over 4 taps, the per-group delta rule over state_size 128 x 16 groups, and the alpha/beta/ssm_a gating
+  2. the gated full attention (16 layers): the q/gate split of attn_q, QK-norm over head_dim 256, and sectioned RoPE (64 of 256 dims, base 10000000)
+  3. the dense FFN (65 layers): ffn_gate/ffn_up/ffn_down with SiLU, no router
+  4. the vocabulary head: output_norm + output.weight [5120, 248320], so no logits can be produced
+  5. the merged nextn MTP head (1 layer, block 64): the eh_proj fusion of [hidden, embedding] C20 asks for
+  6. tensors whose quantisation this engine cannot decode: IQ1_M (1 tensors) IQ2_S (17 tensors) IQ2_XS (9 tensors) IQ2_XXS (5 tensors) IQ3_S (144 tensors) IQ3_XXS (78 tensors) IQ4_XS (96 tensors) Q2_K (13 tensors)
+
+RESULT: qwen35 container and tokenizer verified; layer 0 could NOT be
+        probed (qwen35: token_embd.weight is IQ2_S, which this engine cannot decode).
+        The trunk and the head are REFUSED. No logits are produced by this path.

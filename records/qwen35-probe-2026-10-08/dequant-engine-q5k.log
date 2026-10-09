@@ -1,0 +1,2 @@
+blk.51.ffn_down.weight       type=Q5_K   dims=17408x5120  rows=5120 n_in=17408 stride=11968 bytes=356515840
+blk.55.ffn_down.weight       type=Q5_K   dims=17408x5120  rows=5120 n_in=17408 stride=11968 bytes=356515840

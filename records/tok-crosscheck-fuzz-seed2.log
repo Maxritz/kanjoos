@@ -1,0 +1,145 @@
+engine        : C:\Users\rr\OneDrive\Desktop\Kanjoos\build\cmake-host\kanjoos-run.exe
+llama.cpp     : C:/Users/rr/OneDrive/Desktop/dxl/llama.cpp/build/bin/llama-tokenize.exe
+model         : C:/Users/rr/OneDrive/Desktop/kraken/models/Qwen3-MOE-4x0.6B-2.4B-Q4_K_M.gguf
+strings       : 32 (each written to a file and read with --prompt-file / -f)
+engine ids    : `--dump-tokens -n 0` (`prompt ids :`) or the qwen35 probe's `id(s):`, whichever this architecture prints
+
+string                                        engine   llama   llama  verdict
+                                                 ids   parse     raw  
+corpus    : (none)
+fuzz      : 100 prompts, seed 2, types ('<lambda>', '<lambda>', '<lambda>', '<lambda>', '<lambda>', '<lambda>', '<lambda>', '<lambda>', '<lambda>', '<lambda>', '<lambda>', '<lambda>', '<lambda>', '<lambda>', '<lambda>', '<lambda>')
+The capital of France is                           5       5       5  PASS
+hello world                                        2       2       2  PASS
+1 2 3 123 1234 3.14159 -0.5                       26      26      26  PASS
+  leading and   multiple    spaces                 7       7       7  PASS
+line1\nline2\n\nline3                              8       8       8  PASS
+日本語のテキスト                                           6       6       6  PASS
+emoji: 🚀🔥                                          6       6       6  PASS
+tab\there <|endoftext|>                            9       5       9  POLICY: matches --no-parse-special only; the engine does not parse control tokens
+abc123def 0.5e-3 7zip A1B2C3                      21      21      21  PASS
+don't  it's  can't've  l'été                      13      13      13  PASS
+!!!!  ...  ---  ;;  (((                            9       9       9  PASS
+{ "key": [1,2,3], "n": null }                     16      16      16  PASS
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...         8       8       8  PASS
+supercalifragilisticexpialidocious anti...        17      17      17  PASS
+mixed  mixed\tmixed\nmixed 😀 mixed                 9       9       9  PASS
+a🚀b                                                3       3       3  PASS
+a—b                                                3       3       3  PASS
+10–20                                              5       5       5  PASS
+日本語、です                                             4       4       4  PASS
+a b                                                3       3       3  PASS
+héllo…world                                        5       5       5  PASS
+€100 £5                                            6       6       6  PASS
+emoji🚀fire🔥                                        4       4       4  PASS
+Ünïcödé tèxt                                       9       9       9  PASS
+x y                                                4       4       4  PASS
+éx                                                3       3       3  PASS
+café au lait                                      6       6       6  PASS
+ä́b                                               5       5       5  PASS
+ña                                                4       4       4  PASS
+กิน                                                2       2       2  PASS
+किस                                                3       3       3  PASS
+اَب                                                3       3       3  PASS
+                                                  1       1       1  PASS
+òôñô                                               4       4       4  PASS
+                                               4       4       4  PASS
+                                                  1       1       1  PASS
+���                                                1       1       1  PASS
+���                                                1       1       1  PASS
+���                                                1       1       1  PASS
+ññðñ                                               4       4       4  PASS
+���                                                1       1       1  PASS
+ôôòô                                               4       4       4  PASS
+óôòô                                               4       4       4  PASS
+����                                               1       1       1  PASS
+����                                               1       1       1  PASS
+ÿ                                                  1       1       1  PASS
+ÿ                                                  1       1       1  PASS
+echo ÿÚôöÙôü¸ÓªÄúÏÍèÏµýÝ×°Åº¢Ä¾µ...        83      83      83  PASS
+Õß                                                 2       2       2  PASS
+fm~%ASoz3\<+twH-#Y0bjR^aI2KAAmUs"yg1u'@...        45      45      45  PASS
+                                                  1       1       1  PASS
+���                                                1       1       1  PASS
+echo ¦âè©½®»·öôÏá¶µïìë®úÝ...        51      51      51  PASS
+��                                                 1       1       1  PASS
+����                                               1       1       1  PASS
+��                                                 1       1       1  PASS
+-G9v"Y'Tq^[:k                                     10      10      10  PASS
+ß                                                 3       3       3  PASS
+��                                                 1       1       1  PASS
+ý±ßäö£ØåÁÕä¶øÿÊÛõ¤ßÄûúëýËå»¨ýÂí...        62      62      62  PASS
+ìçê                                                3       3       3  PASS
+ÿ                                                  1       1       1  PASS
+ÛÆ                                                 2       2       2  PASS
+���                                                1       1       1  PASS
+                                                  1       1       1  PASS
+ñóòô                                               4       4       4  PASS
+îàì                                                3       3       3  PASS
+ôðóò                                               4       4       4  PASS
+���                                                1       1       1  PASS
+echo éøÜÔ¹°çáÐö÷­ç·â·ã³Æ±ý£ïûÀ¬÷´...        58      58      58  PASS
+òñðñ                                               4       4       4  PASS
+��������                                           2       2       2  PASS
+���                                                1       1       1  PASS
+þþ                                                 2       2       2  PASS
+��                                                 1       1       1  PASS
+ÿ                                                  1       1       1  PASS
+                                           8       8       8  PASS
+���                                                1       1       1  PASS
+��                                                 1       1       1  PASS
+���                                                1       1       1  PASS
+��                                                 1       1       1  PASS
+���                                                1       1       1  PASS
+¦Î»õ»ÇáÝ¶ÑÛÕõÜªÿñÊö¢                        32      32      32  PASS
+ÿ                                                  1       1       1  PASS
+���                                                1       1       1  PASS
+ñóñò                                               4       4       4  PASS
+ñññò                                               4       4       4  PASS
+���                                                1       1       1  PASS
+���                                                1       1       1  PASS
+���                                                1       1       1  PASS
+echo ÒæÊÞÎåû¬ÂÚðú¯Ðá ÙªÛïÒ¼ãÈø¦ÜÐ...        71      71      71  PASS
+þÿ                                                 2       2       2  PASS
+ÙÎ                                                 2       2       2  PASS
+\n                                          8       8       8  PASS
+���                                                1       1       1  PASS
+þ                                                  1       1       1  PASS
+þ                                                  1       1       1  PASS
+óòóð                                               4       4       4  PASS
+echo Ù¸¬¥íÖ end                                 13      13      13  PASS
+ÿ                                                  1       1       1  PASS
+                                                  1       1       1  PASS
+äáá                                                3       3       3  PASS
+«                                                  1       1       1  PASS
+                                                  1       1       1  PASS
+��������                                           2       2       2  PASS
+?-[;&n;p                                           5       5       5  PASS
+���                                                1       1       1  PASS
+���                                                1       1       1  PASS
+���                                                1       1       1  PASS
+ñññó                                               4       4       4  PASS
+«·                                                3       3       3  PASS
+���                                                1       1       1  PASS
+êéã                                                3       3       3  PASS
+ÑÒ                                                 2       2       2  PASS
+��������                                           2       2       2  PASS
+echo ë£³¶±ä£Ãù¹¤ end                         24      24      24  PASS
+���                                                1       1       1  PASS
+                                                  1       1       1  PASS
+óòññ                                               4       4       4  PASS
+���                                                1       1       1  PASS
+echo éêôÌÅ¶ëÕÂä³î «òôØâùÁ°ùñ±øÖÏ«Þ...        67      67      67  PASS
+°                                                 3       3       3  PASS
+þú¼¦Ìº³Õäè¼¶Â¿£äïôäåùáÈ·½¹ãîæ              41      41      41  PASS
+                                                  1       1       1  PASS
+����                                               1       1       1  PASS
+����                                               1       1       1  PASS
+��������                                           2       2       2  PASS
+Çú¡¤´Ò½¥Ë¢ï£ÏÄùÚ×ÜÙ                     39      39      39  PASS
+����                                               1       1       1  PASS
+echo úÈ¦×ïÙïíë½®©Ú®Ë¿¸çÜ¾»°...        72      72      72  PASS
+ÿ                                                  1       1       1  PASS
+äàè                                                3       3       3  PASS
+
+131/132 strings identical, 1 policy difference(s), 0 merge-boundary difference(s), 1071 tokens compared
+VERDICT: PASS -- every merge boundary agrees with llama.cpp on every string. 1 string(s) differ only in special-token POLICY: the engine tokenises raw text and does not parse control tokens, which is stated here rather than hidden by running llama.cpp in one mode only.

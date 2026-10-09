@@ -1,0 +1,59 @@
+model      : C:/Users/rr/OneDrive/Desktop/kraken/models/Qwen3-MOE-4x0.6B-2.4B-Q4_K_M.gguf
+loaded     : 125.8 ms (mapped, nothing dequantized at load)
+file bytes : 964653184
+gguf ver   : 3, alignment 32, tensors 339, kv 58
+threads    : 8
+geometry   : layers=28 hidden=1024 heads=16/8 head_dim=128 q_dim=2048 kv_dim=1024
+  experts=4 top_k=2 expert_ff=3072 vocab=151936 ctx_train=40960
+  rms_eps=1e-06 rope_base=1e+06 rope=split-halves (ggml NEOX)
+tokenizer  : vocab 151936, bos 151643, eos 151645, add_bos 0
+prompt     : 5 tokens, round-trip "The capital of France is"
+
+-- bench (prompt token repeated; not a quality measurement) --
+pp64      6407.28 ms        9.99 tok/s
+tg32      3288.98 ms        9.73 tok/s  (102.781 ms/token)
+
+  kanjoos 0.1.0   device host CPU reference path (no device backend)   threads 8   ctx 2048   vocab 151936
+                 vram NOT MEASURED here (no device on this path)   ram 74.77/95.91 GiB available   rss peak 1202 MiB   platform win32   cpus 32
+                 clock host   dev/host are SELF time (child time subtracted; max depth 3)   steps kept 92, discarded 4 (warmup 4)   ops 51706   rss 1202 MiB
+                 53952 nested scope(s) measured as self time; the rows partition the run, they do not overlap it
+                 --profiling never changes what the engine computes; this block reports what it measured and nothing else
+{
+  "clock_domain": "host",
+  "detail": "class",
+  "subtract_floor": true,
+  "warmup_steps": 4,
+  "steps_kept": 92,
+  "steps_discarded": 4,
+  "max_depth": 3,
+  "nested_scopes_self_time": 53952,
+  "ops": 51706,
+  "floor": {"n": 256, "host_ns": 80, "dev_ns": 80},
+  "device_backend": false,
+  "device_spans": 0,
+  "device_spans_dropped": 0,
+  "device_floor_measured": false,
+  "components": [
+    {"component": "moe-down", "ops": 5152, "dev_ns": 1718427900, "dev_ns_self": 1718015740.0, "idle_ns": 0, "host_ns": 1718427900, "host_ns_self": 1718015740.0},
+    {"component": "head", "ops": 92, "dev_ns": 1653009900, "dev_ns_self": 1653002540.0, "idle_ns": 0, "host_ns": 1653009900, "host_ns_self": 1653002540.0},
+    {"component": "moe-gate", "ops": 5152, "dev_ns": 1511612500, "dev_ns_self": 1511200340.0, "idle_ns": 0, "host_ns": 1511612500, "host_ns_self": 1511200340.0},
+    {"component": "moe-up", "ops": 5152, "dev_ns": 1490397500, "dev_ns_self": 1489985340.0, "idle_ns": 0, "host_ns": 1490397500, "host_ns_self": 1489985340.0},
+    {"component": "qkv", "ops": 2576, "dev_ns": 1174742900, "dev_ns_self": 1174536820.0, "idle_ns": 0, "host_ns": 1174742900, "host_ns_self": 1174536820.0},
+    {"component": "moe-act", "ops": 5152, "dev_ns": 691237400, "dev_ns_self": 690825240.0, "idle_ns": 0, "host_ns": 691237400, "host_ns_self": 690825240.0},
+    {"component": "attn-o", "ops": 2576, "dev_ns": 537442300, "dev_ns_self": 537236220.0, "idle_ns": 0, "host_ns": 537442300, "host_ns_self": 537236220.0},
+    {"component": "attention", "ops": 2576, "dev_ns": 443841700, "dev_ns_self": 443635620.0, "idle_ns": 0, "host_ns": 443841700, "host_ns_self": 443635620.0},
+    {"component": "moe", "ops": 2576, "dev_ns": 14700900, "dev_ns_self": 14494820.0, "idle_ns": 0, "host_ns": 14700900, "host_ns_self": 14494820.0},
+    {"component": "moe-router", "ops": 2576, "dev_ns": 11393400, "dev_ns_self": 11187320.0, "idle_ns": 0, "host_ns": 11393400, "host_ns_self": 11187320.0},
+    {"component": "prefill", "ops": 1, "dev_ns": 4797300, "dev_ns_self": 4797220.0, "idle_ns": 20356300, "host_ns": 4797300, "host_ns_self": 4797220.0},
+    {"component": "norm", "ops": 2576, "dev_ns": 4721500, "dev_ns_self": 4515420.0, "idle_ns": 0, "host_ns": 4721500, "host_ns_self": 4515420.0},
+    {"component": "norm-ffn", "ops": 2576, "dev_ns": 4152600, "dev_ns_self": 3946520.0, "idle_ns": 0, "host_ns": 4152600, "host_ns_self": 3946520.0},
+    {"component": "moe-scatter", "ops": 5152, "dev_ns": 2728600, "dev_ns_self": 2316440.0, "idle_ns": 0, "host_ns": 2728600, "host_ns_self": 2316440.0},
+    {"component": "decode", "ops": 1, "dev_ns": 2338200, "dev_ns_self": 2338120.0, "idle_ns": 4400, "host_ns": 2338200, "host_ns_self": 2338120.0},
+    {"component": "moe-gather", "ops": 5152, "dev_ns": 2326500, "dev_ns_self": 1914340.0, "idle_ns": 0, "host_ns": 2326500, "host_ns_self": 1914340.0},
+    {"component": "residual", "ops": 2576, "dev_ns": 923000, "dev_ns_self": 716920.0, "idle_ns": 0, "host_ns": 923000, "host_ns_self": 716920.0},
+    {"component": "embed", "ops": 92, "dev_ns": 140900, "dev_ns_self": 133540.0, "idle_ns": 0, "host_ns": 140900, "host_ns_self": 133540.0}
+  ],
+  "residency_measured": false,
+  "transfer_measured": false
+}
+profile files: records/c21-baseline-2026-10-08/t08-ctx2048/profile.{txt,json,csv}

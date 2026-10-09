@@ -1,0 +1,24 @@
+== tokenizer.ggml.pre dispatch ==
+fixtures   : C:/Users/rr/OneDrive/Desktop/Kanjoos/tests/fixtures/tok
+known pre  : 8 name(s)
+  pre_qwen2.gguf       pre=qwen2              -> rule qwen2
+  pre_deepseek-r1-qwen.gguf pre=deepseek-r1-qwen   -> rule qwen2
+  pre_kormo.gguf       pre=kormo              -> rule qwen2
+  pre_f2llmv2.gguf     pre=f2llmv2            -> rule qwen2
+  pre_stablelm2.gguf   pre=stablelm2          -> rule qwen2
+  pre_hunyuan.gguf     pre=hunyuan            -> rule qwen2
+  pre_solar-open.gguf  pre=solar-open         -> rule qwen2
+  pre_qwen35.gguf      pre=qwen35             -> rule qwen2
+      FAIL  qwen35_count > 0
+table      : 8 name(s) -> qwen2, 0 -> qwen35
+-- the mark, on identical vocabularies --
+  qwen2  a+U+0301+b     -> [97, 204, 129, 98]  (4 token(s))
+  qwen35 a+U+0301+b     -> [97, 204, 129, 98]  (4 token(s))
+      FAIL  mark35 == want35
+      FAIL  the two rules produce different ids for a mark
+  both   ab             -> [97, 98]  (control: no mark, rules agree)
+-- refusals --
+  pre_absent.gguf  : tokenizer: the file declares no tokenizer.ggml.pre, and this engine has no default: llama.cpp maps an absent key to its DEFAULT pre-type, whose regex list is EMPTY (the whole text is one segment), which is a different rule from the ones implemented here ('qwen2', 'deepseek-r1-qwen', 'kormo', 'f2llmv2', 'stablelm2', 'hunyuan', 'solar-open', 'qwen35')
+  pre_unknown.gguf : tokenizer: tokenizer.ggml.pre is 'llama3', which this engine does not implement; it implements 'qwen2', 'deepseek-r1-qwen', 'kormo', 'f2llmv2', 'stablelm2', 'hunyuan', 'solar-open', 'qwen35' (llama.cpp's llama_vocab_pre_type_from_name, src/llama-vocab.cpp). Refused rather than tokenized with a rule the file did not declare
+58 check(s), 3 failed
+FAILED: the pre dispatch does not hold

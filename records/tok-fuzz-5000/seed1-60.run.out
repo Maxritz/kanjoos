@@ -1,0 +1,6 @@
+seed 1: logging to C:\Users\rr\OneDrive\Desktop\Kanjoos\records\tok-fuzz-5000\seed1-60.log
+seed 1: ok=91 boundary=0 policy=1 tokens=528 (cross-check total 92)
+
+total: 60 completed prompts, 91 identical, 1 policy, 0 boundary, 528 tokens; 0 unfinished seed(s)
+seed 1: rc=0 ok=91 boundary=0 policy=1 tokens=528 complete=True log=C:\Users\rr\OneDrive\Desktop\Kanjoos\records\tok-fuzz-5000\seed1-60.log
+VERDICT: PASS — no merge-boundary divergence survived across all seeds.

@@ -1,0 +1,209 @@
+== kanjoos qwen35 probe ==========================================
+model      : G:/More-models/ThinkingCap-Qwen3.8-27B-Q4_K_M.gguf
+container  : GGUF v3, 866 tensors, 50 metadata entries, 16.245 GiB
+loaded     : 141.3 ms (mapped; nothing dequantized)
+
+-- geometry, from the file's own metadata --
+  layers         65   (48 recurrent/SSM + 17 full attention, interval 4)
+  hidden        5120   ff 17408, vocab 248320, ctx_train 262144
+  attention     24 heads equivalent: 24 q / 4 kv, head_dim 256 (q_dim 6144, kv_dim 1024)
+  rope          base 10000000, 64 of 256 dims rotated
+  ssm           inner 6144, state 128, groups 16, dt_rank 48, conv_kernel 4 -> conv_dim 10240
+  rms_eps       1e-06
+  nextn (MTP)   1 merged layer(s)
+  layer kinds   SSSASSSASSSASSSASSSASSSASSSASSSASSSASSSASSSASSSASSSASSSASSSASSSAA  (S = recurrent/SSM, A = full attention)
+  kinds source  attention.recurrent_layers (per-layer, exact)
+  conv_dim      10240 == 2 * groups(16) * state(128) + inner(6144)
+
+-- tokenizer --
+  vocab 248320, bos 248044, eos 248046, add_bos 0, chat_template present
+  merges 247587, pre 'qwen35' -> rule qwen35 ([\p{L}\p{M}]+: a combining mark joins the letter run)
+  round-trip (decode(encode(s)) == s):
+    ok   n=5    "The capital of France is"
+    ok   n=2    "hello world"
+    ok   n=26   "1 2 3 123 1234 3.14159 -0.5"
+    ok   n=7    "  leading and   multiple    spaces"
+    ok   n=8    "line1
+line2
+
+line3"
+    ok   n=3    "日本語のテキスト"
+    ok   n=8    "emoji: 🚀🔥"
+    ok   n=9    "tab	here <|endoftext|>"
+    ok   n=0    ""
+  9/9 round-trips exact
+  probe text "The capital of France is" -> 5 id(s): 760 6511 314 9338 369
+
+-- tensor binding --
+  866 tensor(s) bound and shape-checked across 65 layer(s) (48 recurrent, 17 attention, 4 nextn); 0 not usable
+  nextn: 4 tensor(s) on blk.64
+  every tensor is present with the implied shape
+
+-- quantisation coverage (all 866 tensors) --
+  F32       456 tensor(s)  decodable
+  Q4_0        8 tensor(s)  decodable
+  Q4_K      257 tensor(s)  decodable
+  Q5_K        2 tensor(s)  decodable
+  Q6_K       79 tensor(s)  decodable
+  Q8_0       64 tensor(s)  decodable
+
+-- layer 0 (recurrent / SSM) --
+  tokens        : 2 760 6511
+  trunk         : 64 layer(s) = block_count 65 - nextn_predict_layers 1
+  layer kinds   : 48 recurrent (SSM) + 16 full attention; blk.64 (the MTP
+                  block) is NOT in the main pass, as llama.cpp builds it
+  head          : output_norm + output.weight [5120, 248320] (untied), no scaling,
+                  no softcap
+  computed      : 2 token(s) through 64 layer(s) in 36477.9 ms -- embedding,
+                  attn residual, dense FFN residual, output_norm, head
+  position 0  argmax 61748 "ª"   top5 27284(13.01) "º" 169634(12.94) "Ј" 78299(12.74) "¥" 140(12.63) "�"
+  position 1  argmax 5581 "­"   top5 77(12.73) "n" 73(12.04) "j" 56(11.53) "Y" 41(11.41) "J"
+
+-- full-output comparison vs records/qwen35-probe-2026-10-08/trunk2 (rtol 2e-03 of reference RMS) --
+  vector                  n      max_abs     rel_rmse   zeros  unwritten   mismatch  verdict
+  trunk_in            10240    0.000e+00    0.000e+00       0          0          0  PASS
+  trunk_mix0          10240    5.722e-06    8.765e-07       0          0          0  PASS
+  trunk_h0            10240    9.918e-05    7.422e-07       0          0          0  PASS
+  trunk_mix1          10240    9.918e-05    7.389e-07       0          0          0  PASS
+  trunk_h1            10240    9.155e-05    7.026e-07       0          0          0  PASS
+  trunk_mix2          10240    9.155e-05    7.077e-07       0          0          0  PASS
+  trunk_h2            10240    9.155e-05    7.421e-07       0          0          0  PASS
+  trunk_mix3          10240    5.341e-05    5.416e-07       0          0          0  PASS
+  trunk_h3            10240    5.341e-05    5.467e-07       0          0          0  PASS
+  trunk_mix4          10240    5.341e-05    5.469e-07       0          0          0  PASS
+  trunk_h4            10240    4.578e-05    5.276e-07       0          0          0  PASS
+  trunk_mix5          10240    4.578e-05    5.316e-07       0          0          0  PASS
+  trunk_h5            10240    4.578e-05    5.282e-07       0          0          0  PASS
+  trunk_mix6          10240    4.578e-05    5.228e-07       0          0          0  PASS
+  trunk_h6            10240    4.578e-05    5.304e-07       0          0          0  PASS
+  trunk_mix7          10240    3.052e-05    5.060e-07       0          0          0  PASS
+  trunk_h7            10240    3.052e-05    4.997e-07       0          0          0  PASS
+  trunk_mix8          10240    3.052e-05    5.012e-07       0          0          0  PASS
+  trunk_h8            10240    3.052e-05    4.954e-07       0          0          0  PASS
+  trunk_mix9          10240    3.052e-05    4.983e-07       0          0          0  PASS
+  trunk_h9            10240    3.052e-05    4.906e-07       0          0          0  PASS
+  trunk_mix10         10240    3.052e-05    4.908e-07       0          0          0  PASS
+  trunk_h10           10240    3.052e-05    4.901e-07       0          0          0  PASS
+  trunk_mix11         10240    3.052e-05    4.706e-07       0          0          0  PASS
+  trunk_h11           10240    3.052e-05    4.656e-07       0          0          0  PASS
+  trunk_mix12         10240    3.052e-05    4.583e-07       0          0          0  PASS
+  trunk_h12           10240    3.052e-05    4.544e-07       0          0          0  PASS
+  trunk_mix13         10240    3.052e-05    4.575e-07       0          0          0  PASS
+  trunk_h13           10240    3.052e-05    4.542e-07       0          0          0  PASS
+  trunk_mix14         10240    3.052e-05    4.558e-07       0          0          0  PASS
+  trunk_h14           10240    3.052e-05    4.542e-07       0          0          0  PASS
+  trunk_mix15         10240    3.052e-05    4.544e-07       0          0          0  PASS
+  trunk_h15           10240    3.052e-05    4.539e-07       0          0          0  PASS
+  trunk_mix16         10240    3.052e-05    4.544e-07       0          0          0  PASS
+  trunk_h16           10240    3.052e-05    4.537e-07       0          0          0  PASS
+  trunk_mix17         10240    3.052e-05    4.576e-07       0          0          0  PASS
+  trunk_h17           10240    3.052e-05    4.577e-07       0          0          0  PASS
+  trunk_mix18         10240    4.578e-05    4.905e-07       0          0          0  PASS
+  trunk_h18           10240    4.578e-05    5.072e-07       0          0          0  PASS
+  trunk_mix19         10240    4.578e-05    5.475e-07       0          0          0  PASS
+  trunk_h19           10240    4.578e-05    5.550e-07       0          0          0  PASS
+  trunk_mix20         10240    4.578e-05    5.426e-07       0          0          0  PASS
+  trunk_h20           10240    4.578e-05    5.482e-07       0          0          0  PASS
+  trunk_mix21         10240    4.578e-05    5.496e-07       0          0          0  PASS
+  trunk_h21           10240    4.578e-05    5.480e-07       0          0          0  PASS
+  trunk_mix22         10240    4.578e-05    5.487e-07       0          0          0  PASS
+  trunk_h22           10240    4.578e-05    5.522e-07       0          0          0  PASS
+  trunk_mix23         10240    6.104e-05    6.023e-07       0          0          0  PASS
+  trunk_h23           10240    4.578e-05    5.511e-07       0          0          0  PASS
+  trunk_mix24         10240    6.104e-05    6.049e-07       0          0          0  PASS
+  trunk_h24           10240    6.104e-05    6.046e-07       0          0          0  PASS
+  trunk_mix25         10240    6.104e-05    6.054e-07       0          0          0  PASS
+  trunk_h25           10240    6.104e-05    5.994e-07       0          0          0  PASS
+  trunk_mix26         10240    6.104e-05    6.033e-07       0          0          0  PASS
+  trunk_h26           10240    5.341e-05    6.147e-07       0          0          0  PASS
+  trunk_mix27         10240    5.341e-05    6.215e-07       0          0          0  PASS
+  trunk_h27           10240    4.578e-05    5.935e-07       0          0          0  PASS
+  trunk_mix28         10240    4.578e-05    5.976e-07       0          0          0  PASS
+  trunk_h28           10240    4.578e-05    5.920e-07       0          0          0  PASS
+  trunk_mix29         10240    4.578e-05    6.021e-07       0          0          0  PASS
+  trunk_h29           10240    4.578e-05    5.964e-07       0          0          0  PASS
+  trunk_mix30         10240    4.578e-05    6.069e-07       0          0          0  PASS
+  trunk_h30           10240    4.578e-05    6.450e-07       0          0          0  PASS
+  trunk_mix31         10240    4.578e-05    6.635e-07       0          0          0  PASS
+  trunk_h31           10240    4.578e-05    6.375e-07       0          0          0  PASS
+  trunk_mix32         10240    4.578e-05    6.247e-07       0          0          0  PASS
+  trunk_h32           10240    4.578e-05    6.357e-07       0          0          0  PASS
+  trunk_mix33         10240    4.578e-05    6.766e-07       0          0          0  PASS
+  trunk_h33           10240    3.815e-05    6.506e-07       0          0          0  PASS
+  trunk_mix34         10240    3.815e-05    6.545e-07       0          0          0  PASS
+  trunk_h34           10240    4.578e-05    7.136e-07       0          0          0  PASS
+  trunk_mix35         10240    4.578e-05    7.235e-07       0          0          0  PASS
+  trunk_h35           10240    4.578e-05    7.218e-07       0          0          0  PASS
+  trunk_mix36         10240    4.578e-05    7.324e-07       0          0          0  PASS
+  trunk_h36           10240    4.578e-05    7.284e-07       0          0          0  PASS
+  trunk_mix37         10240    4.578e-05    7.502e-07       0          0          0  PASS
+  trunk_h37           10240    4.578e-05    7.724e-07       0          0          0  PASS
+  trunk_mix38         10240    4.578e-05    7.808e-07       0          0          0  PASS
+  trunk_h38           10240    5.341e-05    8.340e-07       0          0          0  PASS
+  trunk_mix39         10240    5.341e-05    8.199e-07       0          0          0  PASS
+  trunk_h39           10240    5.341e-05    8.330e-07       0          0          0  PASS
+  trunk_mix40         10240    5.341e-05    8.356e-07       0          0          0  PASS
+  trunk_h40           10240    5.341e-05    8.238e-07       0          0          0  PASS
+  trunk_mix41         10240    5.341e-05    8.318e-07       0          0          0  PASS
+  trunk_h41           10240    5.341e-05    8.142e-07       0          0          0  PASS
+  trunk_mix42         10240    5.341e-05    8.313e-07       0          0          0  PASS
+  trunk_h42           10240    6.104e-05    9.339e-07       0          0          0  PASS
+  trunk_mix43         10240    6.104e-05    9.166e-07       0          0          0  PASS
+  trunk_h43           10240    5.341e-05    8.661e-07       0          0          0  PASS
+  trunk_mix44         10240    5.341e-05    8.973e-07       0          0          0  PASS
+  trunk_h44           10240    5.341e-05    8.936e-07       0          0          0  PASS
+  trunk_mix45         10240    5.341e-05    9.810e-07       0          0          0  PASS
+  trunk_h45           10240    5.341e-05    9.706e-07       0          0          0  PASS
+  trunk_mix46         10240    5.341e-05    1.040e-06       0          0          0  PASS
+  trunk_h46           10240    4.578e-05    1.116e-06       0          0          0  PASS
+  trunk_mix47         10240    4.578e-05    1.133e-06       0          0          0  PASS
+  trunk_h47           10240    3.815e-05    1.116e-06       0          0          0  PASS
+  trunk_mix48         10240    3.815e-05    1.149e-06       0          0          0  PASS
+  trunk_h48           10240    3.052e-05    1.121e-06       0          0          0  PASS
+  trunk_mix49         10240    3.052e-05    1.573e-06       0          0          0  PASS
+  trunk_h49           10240    3.052e-05    1.752e-06       0          0          0  PASS
+  trunk_mix50         10240    8.965e-05    2.150e-06       0          0          0  PASS
+  trunk_h50           10240    6.866e-05    2.312e-06       0          0          0  PASS
+  trunk_mix51         10240    6.485e-05    2.718e-06       0          0          0  PASS
+  trunk_h51           10240    6.294e-05    2.911e-06       0          0          0  PASS
+  trunk_mix52         10240    5.150e-05    2.944e-06       0          0          0  PASS
+  trunk_h52           10240    9.918e-05    3.160e-06       0          0          0  PASS
+  trunk_mix53         10240    1.259e-04    3.551e-06       0          0          0  PASS
+  trunk_h53           10240    1.240e-04    3.701e-06       0          0          0  PASS
+  trunk_mix54         10240    8.965e-05    3.676e-06       0          0          0  PASS
+  trunk_h54           10240    2.403e-04    4.076e-06       0          0          0  PASS
+  trunk_mix55         10240    1.984e-04    4.049e-06       0          0          0  PASS
+  trunk_h55           10240    1.564e-04    3.941e-06       0          0          0  PASS
+  trunk_mix56         10240    1.640e-04    4.017e-06       0          0          0  PASS
+  trunk_h56           10240    1.526e-04    4.068e-06       0          0          0  PASS
+  trunk_mix57         10240    1.297e-04    3.853e-06       0          0          0  PASS
+  trunk_h57           10240    1.335e-04    3.995e-06       0          0          0  PASS
+  trunk_mix58         10240    1.297e-04    3.978e-06       0          0          0  PASS
+  trunk_h58           10240    1.526e-04    4.402e-06       0          0          0  PASS
+  trunk_mix59         10240    1.183e-04    4.517e-06       0          0          0  PASS
+  trunk_h59           10240    8.392e-05    4.484e-06       0          0          0  PASS
+  trunk_mix60         10240    1.488e-04    4.601e-06       0          0          0  PASS
+  trunk_h60           10240    6.127e-05    4.732e-06       0          0          0  PASS
+  trunk_mix61         10240    6.449e-05    4.784e-06       0          0          0  PASS
+  trunk_h61           10240    6.688e-05    4.861e-06       0          0          0  PASS
+  trunk_mix62         10240    1.793e-04    4.920e-06       0          0          0  PASS
+  trunk_h62           10240    1.099e-03    5.247e-06       0          0          0  PASS
+  trunk_mix63         10240    1.099e-03    4.793e-06       0          0          0  PASS
+  trunk_h63           10240    1.404e-03    4.643e-06       0          0          0  PASS
+  trunk_norm          10240    8.774e-05    4.370e-06       0          0          0  PASS
+  trunk_logits       496640    6.759e-05    5.169e-06       0          0          0  PASS
+  131 vector(s) verified element-by-element, 0 failed, 0 without a
+  reference in records/qwen35-probe-2026-10-08/trunk2 (regenerate it with tools/ref_qwen35.py for the same
+  token ids and layer)
+
+-- NOT IMPLEMENTED (this is the honest end of the probe) --
+  1. the trunk as a forward path rather than a probe: trunk_forward() composes all 64 causal layers, the dense FFN and the head and is verified against an oracle, but it materialises every layer's residual stream (nextn 1 block(s) excluded) and holds state in the probe object. Nothing in the generation loop calls it, so -n and --bench remain refused on a qwen35 file
+  2. residency and batching: this path holds every layer's weights at once in the file mapping and every intermediate in RAM. There is no expert/kv residency decision here, because a dense 65-layer file has none to make
+  3. the merged nextn MTP head (1 layer, block 64): the eh_proj fusion of [hidden, embedding] C20 asks for
+
+RESULT: the qwen35 trunk ran: 64 causal layer(s) in file order, each with
+        its residual, then the dense FFN, output_norm and the untied 248320-wide
+        head, producing logits for every token and 131 of 131 vectors compare equal against the oracle.
+        A token was produced, which no earlier run of this engine did for a
+        qwen35 file. It is a probe of the whole trunk, not a
+        generation loop: see the missing list above.

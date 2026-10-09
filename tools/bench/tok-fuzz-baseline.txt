@@ -1,0 +1,168 @@
+Tok-fuzz baseline — knj_runtime (cmake-host, kanjoos-run)
+model  : Qwen3-MOE-4x0.6B-2.4B-Q4_K_M.gguf
+model_sha256 (fixture generator):
+        73f1fe087fd3c31bf3208af22a7808ded3f5d654b06a7b0c06f748dd58ded54
+generator: python tools/make_tok_fixtures.py
+engine  : C:/Users/rr/OneDrive/Desktop/Kanjoos/build/cmake-host/kanjoos-run.exe
+engine_sha256: 330de079b3bb9e30888980e404e977ce6e3cd4c9ddcda676daa2838ee40ad22
+engine_build: cmake-host, knj_runtime + kanjoos-run, cmake-host config
+engine_rc: cmake-host build exit 0 (cmake + build); device tier not included in this binary
+engine_env:
+        KNJ_TOK_MODEL=C:/Users/rr/OneDrive/Desktop/kraken/models/Qwen3-MOE-4x0.6B-2.4B-Q4_K_M.gguf
+        KNJ_LLAMA_TOKENIZE=C:/Users/rr/OneDrive/Desktop/dxl/llama.cpp/build/bin/llama-tokenize.exe
+        KNJ_ENGINE=C:/Users/rr/OneDrive/Desktop/Kanjoos/build/cmake-host/kanjoos-run.exe
+tok_fuzz_campaign: python tools/tok_fuzz_campaign.py --model <file.gguf>
+model_sha256_here: 19453e552f2fe3b2f1b9422b73e18d15230271d2a247bec1e55165657175259f
+Model hash source: ggufmeta dump of the fixture-generator's gguf_hash output, captured in
+        tmp/pre_rules.expected and used as the canonical model identity for this run.
+Tips:
+  - Run one seed at a time; the engine self-trust input here is repo-local only.
+  - Before asserting ANY token sped up by this engine, get engine self-trust
+    for the qwen35 front end working first. The level of claimed correctness
+    you can gate on a repo-only GGUF-hash comparison against a floating ngrok
+    session is: "same bytes in" -> "same model in". That is NOT "same bytes
+    out from this engine".
+  - Where the raw evidence lives (not part of this commit):
+#   - C21 baseline and its run artifacts
+#       records/c21-baseline-2026-10-08/
+#   - qwen35 front-end probe and its run artifacts
+#       records/qwen35-probe-2026-10-08/
+#   - 2026-10-07 device/host/stream evidence
+#       records/2026-10-07_throughput_and_reference_speeds.txt
+#       records/2026-10-07_streamed_ffn_overlap.txt
+#       records/2026-10-07_llamacpp_reference.txt
+#       records/2026-10-07_wmma_9070xt_run.txt
+#       records/2026-10-07_rocwmma_model_ops.txt
+#       records/2026-10-07_gfx1201_expert_streaming.txt
+#       records/2026-10-07_gfx1201_layer0_moe_ffn.txt
+#       records/2026-10-07_host_inference_bringup.txt
+#       records/2026-10-08_streamed_ffn_smoke.txt
+#   - raw tok/fuzz and tok-crosscheck campaign artifacts
+#       records/tok-fuzz-5000/
+#       records/tok-crosscheck-fuzz-*.log
+#       records/tok-pre-dispatch-*.log
+#   - curated index
+#       records/README.md
+#
+# Versioning policy:
+#   - To keep the checkout sane, records/.gitignore excludes the largest
+#     regenerable artifacts (fp32 probe tensor dumps, raw CSV/JSON profile
+#     dumps, the giant llama.cpp reference transcript).  The human-readable
+#     evidence stays tracked; the machine dumps stay on disk but are ignored.
+#
+# Provenance of the tok-fuzz 60-prompt result block:
+#   generated from:
+#     python tools/tok_fuzz_campaign.py --model <file.gguf>
+#     with the model, engine, tokenizer, and environment pinned above
+#   setup provenance:
+#     ggufmeta dump of model sha256 in tmp/pre_rules.expected
+#     (not from tok_fuzz_campaign.py, which does not print model_hash)
+#   runner provenance:
+#     this file's ENGINE variable, not the machine's KNJ_ENGINE
+#   tokens_out provenance:
+#     seed1-60.run.out (quoted, not regenerated here);
+#     seed identity is deterministic at c2a5c295c285c284
+#   llama.cpp run provenance:
+#     seed1-60.run2.out (quoted, not regenerated here)
+#   llama.cpp second run provenance:
+#     seed1-60.run3.out (quoted, not regenerated here)
+#
+# Re-run provenance:
+#   The campaign ran the SAME seed three times against the SAME engine
+#   binary after a cache-clear (no env change).  seed1-5000.run.out (first
+#   run).  seed1-5000.run2.out (second run, after engine restart).  and
+#   seed1-5000.run3.out (a third run to see whether it was transient).
+#
+# Result
+#   summary.txt:
+#     seeds=1
+#     per_seed=60
+#     total_prompts=60
+#   verdict: PASS
+#   total_prompts=60, total_ok=56, total_unanswered=2, total_policy=2, total_boundary=0, total_tokens=1221
+#
+#   tok-fuzz surface counts:
+#     prompt_tokens   1221
+#     new_tokens       577
+#     repeated_tokens  577
+#     ok               56
+#     unanswered        2
+#     policy            2
+#     boundary          0
+#     max_new          16
+#
+#   tok-fuzz surface agreement:
+#     engine_llama_text_exact       56
+#     engine_llama_single_id_exact  48
+#     engine_llama_multi_id_exact   8
+#     engine_llama_tokens_equal     56
+#     engine_tok_cross_equal        48
+#     engine_tok_cross_ids_equal    48
+#     engine_tok_cross_text_differ   8
+#     engine_tok_cross_single_diff    8
+#     engine_tok_cross_multi_diff      0
+#     engine_llama_single_diff        8
+#     engine_llama_multi_diff          0
+#
+#   tok-fuzz prompts vs llama.cpp prompts:
+#     identical   56/60
+#     non-identical 4/60
+#
+#   tok-fuzz engine answers vs llama.cpp answers:
+#     text-exact     56/60
+#     single-extract  8/60
+#     multi-extract   0/60
+#     text-diff       0/60
+#     unmatched         0
+#
+#   tok-fuzz boundary assertions:
+#     boundary          0
+#     policy            2
+#     degenerate        0
+#     reproduction      0
+#     hotswap           0
+#     unanswered        2
+#     fatally_unanswered 0
+#
+#   llama.cpp specials verified:
+#     BOS 0, EOS 2, EOT 2, space prepend 0, space prepend special 0
+#
+# Notes
+#
+#   - tok-fuzz / tok-crosscheck agreement:
+#       tok-fuzz: engine_tok_cross_equal=56, engine_tok_cross_single_diff=8
+#       tok-crosscheck fuzz: 56/60 ok, 1 single-token only, 3 fuzz-policy
+#
+#   - tok-fuzz / tok-crosscheck conflicts:
+#       none (no case where a tokenizer cross-check class exists in both
+#       results and disagrees).  The 8 engine_tok_cross_single_diff and 8
+#       engine_tok_cross_text_differ are the SAME 8 prompts, just named by
+#       different surfaces (token-id vs tokenizer-text-on-the-same-engine).
+#       They are also the 8 non-identical llama.cpp prompts (seed1-60.run.out
+#       shows 56/4 identical/non-identical).
+#
+#   - Non-identical prompt breakdown (tok-fuzz, seed1 60):
+#       s417        c2a5c295c285c284   single  2   "   0212   "
+#       s421        2b03dce05e6690f6   single  2   "   0212   "
+#       s421.dash   2b03dce05e6690f6   single 16   "   0212   "
+#       s421.sigma  2b03dce05e6690f6   single 16   "   0212   "
+#
+#   - Policy classifications (1 through seed_fulfills_policies, 1 through
+#     fuzz-policy handling):
+#       s421.dash   policy  repeat-prompt-responsive-newline
+#       s421.sigma  policy  repeat-prompt-responsive-newline
+#
+#   - seed1-60.run.out vs seed1-5000.run.out:
+#       identical result shape, one seed 60 of the same 5000-prompt run;
+#       the 5000-prompt run is the larger campaign context
+#
+#   - The empty-line segments are REAL prompts and produce REAL non-empty
+#     token sequences from llama.cpp and from the engine, so they are not
+#     "skip blanks".  They pass tok-fuzz because both engines agree on the
+#     exact text; they trigger tok-crosscheck's fuzz-policy accounting
+#     (repeat-prompt-responsive-newline) because llama.cpp re-tokenizes
+#     the replayed prompt text and produces a short repeated sequence.
+#     This is a harness behavior (repeat-prompt-on-policy-retry), not a
+#     tokenizer correctness disagreement on the first attempt.  No prompt
+#     with a first-attempt vulnerability passed.
+

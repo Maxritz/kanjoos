@@ -1,0 +1,26 @@
+
+     component              ops    %dev       dev us      idle us      host us
+     moe-down              5152   18.5%   1718015.74         0.00   1718015.74
+     head                    92   17.8%   1653002.54         0.00   1653002.54
+     moe-gate              5152   16.3%   1511200.34         0.00   1511200.34
+     moe-up                5152   16.1%   1489985.34         0.00   1489985.34
+     qkv                   2576   12.7%   1174536.82         0.00   1174536.82
+     moe-act               5152    7.5%    690825.24         0.00    690825.24
+     attn-o                2576    5.8%    537236.22         0.00    537236.22
+     attention             2576    4.8%    443635.62         0.00    443635.62
+     moe                   2576    0.2%     14494.82         0.00     14494.82
+     moe-router            2576    0.1%     11187.32         0.00     11187.32
+     prefill                  1    0.1%      4797.22     20356.30      4797.22
+     norm                  2576    0.0%      4515.42         0.00      4515.42
+     norm-ffn              2576    0.0%      3946.52         0.00      3946.52
+     moe-scatter           5152    0.0%      2316.44         0.00      2316.44
+     decode                   1    0.0%      2338.12         4.40      2338.12
+     moe-gather            5152    0.0%      1914.34         0.00      1914.34
+     residual              2576    0.0%       716.92         0.00       716.92
+     embed                   92    0.0%       133.54         0.00       133.54
+   instrumentation floor, 256 empty ops timed through the same begin/end path: 0.080 us host, 0.080 us device each.
+   totals: dev 9264798.52 us   idle 20360.70 us   host 9264798.52 us   over 51706 op(s)
+   clock domain: host  (no device event backend on this path: dev and host are the same interval by construction)
+
+  residency   NOT MEASURED on this path
+  transfer    NOT MEASURED on this path

@@ -1,0 +1,55 @@
+
+===== seed 2, 5000 prompts, bc3fa64a88aa =====
+model=C:/Users/rr/OneDrive/Desktop/kraken/models/Qwen3-MOE-4x0.6B-2.4B-Q4_K_M.gguf
+llama-tokenize=C:/Users/rr/OneDrive/Desktop/dxl/llama.cpp/build/bin/llama-tokenize.exe
+engine=C:/Users/rr/OneDrive/Desktop/Kanjoos/build/cmake-host/kanjoos-run.exe
+KNJ_TOK_MODEL=C:/Users/rr/OneDrive/Desktop/kraken/models/Qwen3-MOE-4x0.6B-2.4B-Q4_K_M.gguf
+KNJ_LLAMA_TOKENIZE=C:/Users/rr/OneDrive/Desktop/dxl/llama.cpp/build/bin/llama-tokenize.exe
+KNJ_ENGINE=C:/Users/rr/OneDrive/Desktop/Kanjoos/build/cmake-host/kanjoos-run.exe
+
+
+rc=3221225794
+
+===== seed 2, 5000 prompts, bc3fa64a88aa =====
+model=C:/Users/rr/OneDrive/Desktop/kraken/models/Qwen3-MOE-4x0.6B-2.4B-Q4_K_M.gguf
+llama-tokenize=C:/Users/rr/OneDrive/Desktop/dxl/llama.cpp/build/bin/llama-tokenize.exe
+engine=C:/Users/rr/OneDrive/Desktop/Kanjoos/build/cmake-host/kanjoos-run.exe
+KNJ_TOK_MODEL=C:/Users/rr/OneDrive/Desktop/kraken/models/Qwen3-MOE-4x0.6B-2.4B-Q4_K_M.gguf
+KNJ_LLAMA_TOKENIZE=C:/Users/rr/OneDrive/Desktop/dxl/llama.cpp/build/bin/llama-tokenize.exe
+KNJ_ENGINE=C:/Users/rr/OneDrive/Desktop/Kanjoos/build/cmake-host/kanjoos-run.exe
+
+
+rc=3221225794
+
+===== seed 2, 5000 prompts, bc3fa64a88aa =====
+model=C:/Users/rr/OneDrive/Desktop/kraken/models/Qwen3-MOE-4x0.6B-2.4B-Q4_K_M.gguf
+llama-tokenize=C:/Users/rr/OneDrive/Desktop/dxl/llama.cpp/build/bin/llama-tokenize.exe
+engine=C:/Users/rr/OneDrive/Desktop/Kanjoos/build/cmake-host/kanjoos-run.exe
+KNJ_TOK_MODEL=C:/Users/rr/OneDrive/Desktop/kraken/models/Qwen3-MOE-4x0.6B-2.4B-Q4_K_M.gguf
+KNJ_LLAMA_TOKENIZE=C:/Users/rr/OneDrive/Desktop/dxl/llama.cpp/build/bin/llama-tokenize.exe
+KNJ_ENGINE=C:/Users/rr/OneDrive/Desktop/Kanjoos/build/cmake-host/kanjoos-run.exe
+
+
+rc=3221225794
+
+===== seed 2, 5000 prompts, bc3fa64a88aa =====
+model=C:/Users/rr/OneDrive/Desktop/kraken/models/Qwen3-MOE-4x0.6B-2.4B-Q4_K_M.gguf
+llama-tokenize=C:/Users/rr/OneDrive/Desktop/dxl/llama.cpp/build/bin/llama-tokenize.exe
+engine=C:/Users/rr/OneDrive/Desktop/Kanjoos/build/cmake-host/kanjoos-run.exe
+KNJ_TOK_MODEL=C:/Users/rr/OneDrive/Desktop/kraken/models/Qwen3-MOE-4x0.6B-2.4B-Q4_K_M.gguf
+KNJ_LLAMA_TOKENIZE=C:/Users/rr/OneDrive/Desktop/dxl/llama.cpp/build/bin/llama-tokenize.exe
+KNJ_ENGINE=C:/Users/rr/OneDrive/Desktop/Kanjoos/build/cmake-host/kanjoos-run.exe
+
+
+--- stderr ---
+usage: tok_crosscheck.py [-h] [--model MODEL] [--engine ENGINE]
+                         [--llama-tokenize LLAMA_TOKENIZE] [--strict]
+                         [--separator-sweep] [--strings-file STRINGS_FILE]
+                         [--corpus [CORPUS ...]] [--only-corpus]
+                         [--max-tokens MAX_TOKENS] [--fuzz FUZZ]
+                         [--fuzz-seed FUZZ_SEED] [--fuzz-verbose]
+                         [--fuzz-min-fail FUZZ_MIN_FAIL]
+                         [--max-strings MAX_STRINGS]
+tok_crosscheck.py: error: unrecognized arguments: --fuzz-boundary-exit 1
+
+rc=2

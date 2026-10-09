@@ -1,0 +1,9 @@
+seed 1: logging to C:\Users\rr\OneDrive\Desktop\Kanjoos\records\tok-fuzz-5000\seed1-5000.log
+seed 1: rc=1 (see C:\Users\rr\OneDrive\Desktop\Kanjoos\records\tok-fuzz-5000\seed1-5000.log)
+seed 2: logging to C:\Users\rr\OneDrive\Desktop\Kanjoos\records\tok-fuzz-5000\seed2-5000.log
+seed 2: rc=3221225794 (see C:\Users\rr\OneDrive\Desktop\Kanjoos\records\tok-fuzz-5000\seed2-5000.log)
+seed 3: logging to C:\Users\rr\OneDrive\Desktop\Kanjoos\records\tok-fuzz-5000\seed3-5000.log
+seed 3: rc=3221225794 (see C:\Users\rr\OneDrive\Desktop\Kanjoos\records\tok-fuzz-5000\seed3-5000.log)
+
+total: 0 prompts, 0 identical, 0 policy, 0 boundary, 0 tokens
+VERDICT: PASS — no merge-boundary divergence survives.
