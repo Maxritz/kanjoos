@@ -95,6 +95,49 @@ class Profiler {
   void set_domain(ClockDomain d) { domain_ = d; }
   ClockDomain domain() const { return domain_; }
 
+  // ---- device event backend ------------------------------------------------
+  // The contract's `dev` column is GPU busy time from paired device events. A
+  // host-only path has no events, so `dev` is the op's own interval and the
+  // report declares ClockDomain::Host. Attaching a backend is what makes the two
+  // columns mean different things:
+  //
+  //   * `enable_device_backend()` flips the domain to Device. From then on a
+  //     host marker pair contributes `host` time ONLY: a host interval cannot
+  //     know when the device was busy.
+  //   * `device_span()` is called once per span at FLUSH time -- after the run,
+  //     never inside the step loop (AGENTS.md rule 12 forbids a synchronise
+  //     there). It takes **offsets from one epoch event recorded on the same
+  //     stream**, not durations, because idle is a gap *between* spans and a
+  //     duration cannot express one.
+  //   * Device rows are **self time**, by the same rule as host rows: a span
+  //     contained in another adds to its parent's child total, so a parent and
+  //     its child never both claim the same microseconds. Spans are folded in
+  //     ascending start order per stream.
+  //   * `dev` is only meaningful to the resolution of the event timer
+  //     (elapsed-time is reported in float milliseconds, so a span that is a
+  //     fraction of a microsecond is inside the timer's noise). The report says
+  //     so rather than implying precision it does not have.
+  void enable_device_backend() {
+    device_backend_ = true;
+    domain_ = ClockDomain::Device;
+  }
+  bool device_backend() const { return device_backend_; }
+  void device_span(const char* name, uint64_t start_ns, uint64_t end_ns, int stream = 0);
+  // A device floor is measured through the same event path. Without it the table
+  // says the dev rows are raw: subtracting a HOST floor from DEVICE time would
+  // be an arithmetic error dressed as a correction.
+  void set_device_floor(uint64_t ns, int n) {
+    dev_floor_ns_ = ns;
+    dev_floor_n_ = n;
+    device_floor_measured_ = true;
+  }
+  bool device_floor_measured() const { return device_floor_measured_; }
+  // The caller reports spans its event ring could not hold, so a full ring is a
+  // stated loss rather than a silent one.
+  void set_device_dropped(uint64_t spans) { dev_spans_dropped_ = spans; }
+  uint64_t device_spans() const { return dev_spans_recorded_; }
+  uint64_t device_dropped() const { return dev_spans_dropped_; }
+
   void note_residency(const ResidencyStats& r) { res_ = r; }
   void note_transfer(const TransferStats& t) { xfer_ = t; }
 
@@ -135,11 +178,18 @@ class Profiler {
   struct Row {
     std::string group;
     uint64_t ops = 0, dev_ns = 0, idle_ns = 0, host_ns = 0;
+    // How many DEVICE spans landed in this row. A device-only row has ops 0 but
+    // is still N measurements, and the device floor is per measurement -- without
+    // this the floor would silently not be applied to exactly the rows that came
+    // from the device clock.
+    uint64_t dev_spans = 0;
   };
   Row* find_or_add(const std::string& group);
   std::string group_for(const std::string& name) const;
   std::vector<Row> rows_sorted() const;
-  double subtract(const Row& r) const;
+  double subtract_dev(const Row& r) const;
+  double subtract_host(const Row& r) const;
+  void fold_device_spans() const;
   std::string identity_line() const;
 
   // One open marker. `child_ns` accumulates the inclusive spans of the scopes
@@ -148,6 +198,12 @@ class Profiler {
     std::string group;
     uint64_t t0 = 0;
     uint64_t child_ns = 0;
+  };
+
+  // One device event pair, as offsets from the stream's epoch event.
+  struct DeviceSpan {
+    std::string group;
+    uint64_t start = 0, end = 0;
   };
 
   ProfileConfig cfg_;
@@ -163,6 +219,19 @@ class Profiler {
   int floor_n_ = 0;
   ResidencyStats res_;
   TransferStats xfer_;
+
+  // Device backend state. `dev_pending_` is `mutable` and the fold is done on
+  // demand from the const report writers, because the alternative -- requiring
+  // the caller to remember a finalise call -- loses the LAST span of every
+  // stream when it is forgotten, and a silently dropped measurement is worse
+  // than an ugly `mutable`.
+  bool device_backend_ = false;
+  bool device_floor_measured_ = false;
+  uint64_t dev_floor_ns_ = 0;
+  int dev_floor_n_ = 0;
+  uint64_t dev_spans_recorded_ = 0, dev_spans_dropped_ = 0;
+  mutable bool dev_need_fold_ = false;
+  mutable std::vector<DeviceSpan> dev_pending_[8];
 };
 
 // RAII marker. Two clock reads and a pointer when profiling is off, so a hot

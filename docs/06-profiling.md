@@ -6,11 +6,24 @@
 > verified: `--profiling[=table|json|csv|no-subtract|off]`, `--profile-dir`,
 > `--profile-floor`, `--profile-warmup`, `--profile-detail=class|layer`. **Not**
 > implemented: `--profiling=counters`, `--profiling=full` (both are refused with a
-> message rather than silently redefined), the `kanjoos serve` spelling, and the
-> device event backend — so on the host path `dev` and `host` are the same
-> interval and every report says `clock host` and which convention is in force.
-> The residency and transfer footers print `NOT MEASURED on this path` until a
-> path that has them reports in.
+> message rather than silently redefined) and the `kanjoos serve` spelling.
+>
+> **Device event backend: BUILT.** `enable_device_backend()` flips the domain to
+> `clock device`, and a device layer feeds `device_span(name, start_ns, end_ns,
+> stream)` with **offsets from one epoch event per stream** — offsets rather than
+> durations, because idle is a gap *between* spans. `tools/bench/q4k_stream_ffn.hip`
+> is the first path that reports this way: 27 compute-stream event pairs per pass,
+> folded into one `device-layer` row with its own idle gaps, printed beside a host
+> row for the same pass. See §4.1 for what that number does and does not claim.
+>
+> **Residency and transfer footers: MEASURED on that path**, from counters the pass
+> already keeps (slots/peak, evictions, demand hits, h2d/d2h/nvme bytes, peak
+> pinned staging). They print `NOT MEASURED on this path` only where a path has no
+> such counters, which remains the correct thing for it to say.
+>
+> **Regression gate: `tools/c21/profile_diff.py`.** Diffs two C21 JSON profiles and
+> exits non-zero when a judged component's self time regresses past a tolerance;
+> re-pinning requires `--reason`, which is written into the reference. See §11.
 >
 > **Every number in the blocks below is still a format example and none of them
 > has ever been produced by a run.** The values are unchanged from the original
@@ -136,6 +149,44 @@ transfer component with real `dev us` and a large `idle us` on the consumer, plu
 disappear into a generic idle number.
 
 ---
+
+## 4.1 The device clock, and what its numbers claim
+
+A host-only path has no device events, so `dev` *is* the op's own interval and
+the report declares `clock host`. A device backend changes that, and the
+arithmetic is fixed:
+
+* **Offsets, not durations.** The device layer records a begin and an end event on
+  one stream, then at flush time asks for each event's offset from a single
+  **epoch** event recorded on that same stream. A duration cannot express idle —
+  idle is a gap *between* two spans — so the layer supplies start and end and the
+  profiler computes the gaps.
+* **Per stream.** Gaps are summed per stream. Two concurrent streams have their
+  own idle, and one global gap would be a lie about an overlapped engine.
+* **Idle is proven, not imputed.** A gap counts as idle only when it sits between
+  two **outermost** spans on a stream. A gap inside a parent span is not idle: the
+  report already attributes that interval to the parent. The consequence is that a
+  span containing a queue-empty stall is *not* split into work + idle. That
+  asymmetry is deliberate — idle is claimed only where it can be proven.
+* **Self time, the same rule as host rows.** A span contained in another
+  contributes to its parent's child total, so a parent and its child never both
+  claim the same microseconds.
+* **The floor has two clocks.** The host floor is measured through the host
+  begin/end path; a *device* floor must be measured through the event path
+  (`set_device_floor`). Until it is, the dev rows are published **raw**, because
+  subtracting a host floor from device time is an arithmetic error wearing a
+  correction's clothes. The multiplication is per **measurement** — `ops` for a
+  host-marker row, span count for a device-only row.
+* **Resolution is stated.** `hipEventElapsedTime` reports float milliseconds, so a
+  span below roughly 0.1 µs is inside the timer's noise. Isolated empty event
+  pairs on this machine measure a floor of **0.5–0.8 µs** (min of 64); the report
+  names the floor and the resolution instead of implying precision it lacks.
+* **A dropped span is a stated loss.** A ring that fills reports `N dropped`, so a
+  profiler that lost measurements never reads as a faster run.
+
+What a `device-layer` span does **not** claim: it is the device-timeline window
+that the layer's work occupies in stream order. Nothing here samples execution-unit
+occupancy, and the report says so rather than calling the window "GPU busy".
 
 ## 5. Instrumentation
 
@@ -295,3 +346,131 @@ correctly diagnosed run. The plan's success condition is that the same table on
 an engine with good tiering shows the same attention dominance **and** a transfer
 line that is small, with a non-zero `storage-bound` label on the runs where it
 is honestly bound.
+## 11. The regression gate
+
+A table you read is not a gate. `tools/c21/profile_diff.py` makes the comparison
+the artifact:
+
+```sh
+python tools/c21/profile_diff.py --self-test                 # grades the gate itself
+python tools/c21/profile_diff.py --ref ref.json --cur new.json
+python tools/c21/profile_diff.py --ref ref.json --cur new.json --repin \
+    --reason "why the new number is the right number"
+```
+
+Three decisions worth stating, because each one is a way the gate could have been
+decorative:
+
+1. **A component in the reference but absent from the current profile is a
+   regression**, not a skip — the same rule `run_bench.sh` already applies to a
+   pinned metric it cannot read. Renaming a scope therefore fails the gate, which
+   is the point: a rename silently breaks every comparison built on the old name.
+2. **Rows below the noise floor are not judged**, and the report says `NOT JUDGED`
+   with the threshold. The profiler publishes its own floor; a 40% "regression" on
+   0.4 µs is noise wearing a percentage.
+3. **Clock domains must match.** Comparing a host interval against device event
+   time is meaningless rather than merely imprecise, so the tool refuses (exit 3)
+   instead of printing a number.
+
+Exit codes: `0` pass, `1` regression or vanished component, `2` usage error
+(including `--repin` without `--reason`), `3` inputs not comparable.
+
+A re-pin records `reason`, `pinned_at`, `metric`, `tol_pct`, `clock_domain`,
+`detail`, and the reason it replaced. `--repin` without `--reason` is refused,
+because a pin that does not say why it moved is indistinguishable from a pin that
+was moved to silence a gate. A reference with no pin block is reported as such
+rather than silently trusted.
+
+**One artifact to read carefully:** container rows (`prefill`, `decode`, a test
+suite's `pass`) are self time, so when their leaves get *slower* the container's
+self time gets *smaller* and the diff reports `improved`. Measured: a 1-thread run
+against a 32-thread reference reports `decode` −53.0% and `prefill` −48.8% while
+`head` regresses +972%. The rows partition the run, so this is arithmetic and not
+a bug — but it means an `improved` container is never evidence that anything got
+better.
+
+## 12. Sub-component instrumentation of `moe`
+
+`moe` was 57% of device time on the reference model and a single opaque row. It is
+now instrumented at the stage level, so the dominant component is attributed
+instead of restated:
+
+| row | what it covers |
+|---|---|
+| `moe-router` | the router GEMM, the softmax, the exact top-k, the renormalise |
+| `moe-gather` | gathering the rows an expert actually sees |
+| `moe-gate` / `moe-up` / `moe-down` | the three expert GEMMs, one row each |
+| `moe-act` | the silu×up activation |
+| `moe-scatter` | the weighted scatter-add back into the residual |
+| `moe` | what is left: the output fill and the loop itself |
+
+Measured on Qwen3-MoE-4x0.6B (`--bench 16 8 --profiling --profile-warmup 2`): the
+`moe` row falls from **57.2% to 0.2%**, and the branch is `moe-down` 17.2% +
+`moe-up` 16.7% + `moe-gate` 16.4% + `moe-act` 6.8% + router/gather/scatter ≈ 0.1%
+— i.e. the three expert GEMMs are ~50% of device time and **the router is 0.1%**.
+The scope names deliberately avoid a bare `router`/`gate` so they read as parts of
+`moe` rather than as top-level components. With `--profile-detail=layer` the same
+instrumentation yields `moe-gate:12` and friends, unchanged.
+
+## 13. The baseline, and the reference profile this checkout pins
+
+**MEASURED 2026-10-08** on the only model that runs end-to-end here
+(`Qwen3-MOE-4x0.6B-2.4B-Q4_K_M.gguf`). The cell-level record, with every
+`run.log`, menu, table and JSON, is
+[`records/c21-baseline-2026-10-08/`](../records/c21-baseline-2026-10-08/README.md);
+this section is the design-facing statement of it.
+
+```sh
+export PATH="/c/Strawberry/c/bin:$PATH"   # MinGW runtime, else the exe exits 127
+kanjoos-run.exe --model <moe.gguf> --bench 64 32 --threads 8 --ctx 2048 \
+    --profiling=json --profile-dir <dir> --profile-warmup 4
+```
+
+| axis | measured |
+|---|---|
+| threads (ctx 2048) | 1 → 2 → 4 → 8 → **16 → 32**: speedup 1.00× → 1.91× → 3.33× → 5.47× → **6.82×** → 5.32× |
+| context (8 threads) | ctx 512 / 1024 / 2048 / 4096 / 8192 → profile total 9.48 / 9.30 / 9.26 / 9.16 / 9.21 s, **3.4% spread** |
+| repeatability, pinned cell ×3 | prefill 6407.28 / 6315.91 / 6344.78 ms, decode 3288.98 / 3267.44 / 3267.16 ms → **≤1.5%** |
+| shares at the pin | expert GEMMs (down+gate+up) **50.9%**, whole `moe` path 58.9%, attention block 23.3%, `head` alone **17.8%**, everything else **0.6%** |
+
+Three things this baseline settles:
+
+1. **The ceiling is 16 threads (6.82×, 43% of linear on 16 physical cores).** 32
+   threads is *worse than 16* on both axes — SMT oversubscription, measured, not
+   assumed. So a "more threads is better" default is wrong here by 22%.
+2. **A thread increase has two opposite effects, and only the component table
+   shows both.** 16 threads vs 8: `head` −32.0%, `moe-down` −24.2%,
+   `moe-gate` −23.8%, `moe-up` −23.7%, `attn-o` −18.0%, `qkv` −11.6% — while
+   `moe-gather` +44.4%, `moe-scatter` +33.2%, `prefill` +30.4%, `decode` +26.6%,
+   `norm/-ffn` +12.5/+12.9%. The parallel regions gain, the serial glue pays the
+   pool wake-up. Overall it is 22% faster, which is exactly why the wall clock
+   alone is not enough evidence.
+3. **`--ctx` is an allocation knob on this path, not arithmetic.** Prefill is 64
+   tokens and decode attends over `n_past` (96), so the KV budget never binds;
+   the 16× change in `--ctx` moves the total by less than the run-to-run noise of
+   the *machine* would in a noisy cell. Reported because it was measured; a future
+   path with a real KV budget must not inherit the claim.
+
+**The pin.** [`tools/c21/baseline/ref-8t-ctx2048.json`](../tools/c21/baseline/ref-8t-ctx2048.json)
+holds the 8-thread cell with its `pin` block, so the gate can be run without
+re-deriving a reference:
+
+```sh
+python tools/c21/profile_diff.py --ref tools/c21/baseline/ref-8t-ctx2048.json \
+    --cur records/c21-baseline-2026-10-08/<cell>/profile.json
+```
+
+Run against the matrix it passes the two repeat cells (`rc 0`, 18 judged, 0
+failed) and fails the slower operating points as it should: `t16` 7 failed, `t32`
+11 failed, `t1` 10 failed. The cell chosen is 8 threads, **not** the fastest one
+(16): a reference that encodes an over-subscribed optimum would make the next
+person's `16 → 8` change look like a regression. The reason is recorded in the
+file itself, as `--repin` requires.
+
+**A threshold finding, left alone on purpose:** the two cells that differ only in
+`--ctx` each failed on one *small* row (`moe-gather` +13.6% on 2.2 ms,
+`norm-ffn` +15.2% on 3.9 ms) — 0.02% of the run each. The default `--min-us 50`
+is too low to be meaningful for this model, where the honest floor is ~5 000 µs.
+It is left at 50 because the threshold is global and retuning it to make one
+model's noise disappear is the tolerance-fitting AGENTS.md §4 rule 8 forbids;
+the fix is to pass `--min-us 5000` when running this baseline, and to say so.

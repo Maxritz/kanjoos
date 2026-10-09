@@ -1,0 +1,36 @@
+engine        : C:\Users\rr\OneDrive\Desktop\Kanjoos\build\cmake-host\kanjoos-run.exe
+llama.cpp     : C:/Users/rr/OneDrive/Desktop/dxl/llama.cpp/build/bin/llama-tokenize.exe
+model         : C:/Users/rr/OneDrive/Desktop/kraken/models/Qwen3-MOE-4x0.6B-2.4B-Q4_K_M.gguf
+strings       : 25 (each written to a file and read with --prompt-file / -f)
+engine ids    : `--dump-tokens -n 0` (`prompt ids :`) or the qwen35 probe's `id(s):`, whichever this architecture prints
+
+string                                        engine   llama   llama  verdict
+                                                 ids   parse     raw  
+The capital of France is                           5       5       5  PASS
+hello world                                        2       2       2  PASS
+1 2 3 123 1234 3.14159 -0.5                       26      26      26  PASS
+  leading and   multiple    spaces                 7       7       7  PASS
+line1\nline2\n\nline3                              8       8       8  PASS
+日本語のテキスト                                           6       6       6  PASS
+emoji: 🚀🔥                                          6       6       6  PASS
+tab\there <|endoftext|>                            9       5       9  POLICY: matches --no-parse-special only; the engine does not parse control tokens
+abc123def 0.5e-3 7zip A1B2C3                      21      21      21  PASS
+don't  it's  can't've  l'été                      13      13      13  PASS
+!!!!  ...  ---  ;;  (((                            9       9       9  PASS
+{ "key": [1,2,3], "n": null }                     16      16      16  PASS
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...         8       8       8  PASS
+supercalifragilisticexpialidocious anti...        17      17      17  PASS
+mixed  mixed\tmixed\nmixed 😀 mixed                 9       9       9  PASS
+a🚀b                                                3       3       3  PASS
+a—b                                                3       3       3  PASS
+10–20                                              5       5       5  PASS
+日本語、です                                             4       4       4  PASS
+a b                                                3       3       3  PASS
+héllo…world                                        5       5       5  PASS
+€100 £5                                            6       6       6  PASS
+emoji🚀fire🔥                                        4       4       4  PASS
+Ünïcödé tèxt                                       9       9       9  PASS
+x y                                                4       4       4  PASS
+
+24/25 strings identical, 1 policy difference(s), 0 merge-boundary difference(s), 208 tokens compared
+VERDICT: PASS -- every merge boundary agrees with llama.cpp on every string. 1 string(s) differ only in special-token POLICY: the engine tokenises raw text and does not parse control tokens, which is stated here rather than hidden by running llama.cpp in one mode only.

@@ -9,6 +9,12 @@
 cmake_minimum_required(VERSION 3.20)
 project(kanjoos LANGUAGES CXX)
 
+# Tests are registered with add_test() in the subdirectories. enable_testing()
+# has to run at the TOP level too, or ctest finds no CTestTestfile.cmake in the
+# build root and reports "No tests were found" while the test executables sit
+# there unbuilt and unrun -- a check that silently does not happen.
+enable_testing()
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -114,7 +120,9 @@ add_library(knj_runtime STATIC
     src/loader/gguf.cpp
     src/loader/dequant.cpp
     src/tokenizer/tokenizer.cpp
+    src/tokenizer/unicode_ranges.cpp
     src/model/model.cpp
+    src/model/qwen35.cpp
 )
 target_include_directories(knj_runtime PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(knj_runtime PUBLIC cxx_std_17)

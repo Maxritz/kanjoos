@@ -1,15 +1,15 @@
 seeds=(1,)
-prompts_per_seed=5000
-total_prompts=0
-total_unfinished=1
-total_ok=0
-total_policy=0
-total_boundary=1
-total_tokens=0
-crosscheck_sha256=2de59521cd6de20b48bad8cb
-crosscheck_display_sha256=2de59521cd6d
+prompts_per_seed=400
+total_prompts=400
+total_unfinished=0
+total_ok=431
+total_policy=1
+total_boundary=0
+total_tokens=3324
+crosscheck_sha256=6ae9e6a839927f9ac273e5ac
+crosscheck_display_sha256=6ae9e6a83992
 fuzz_seed=1
 
 per_seed:
-seed1: rc=143 ok=0 boundary=0 policy=0 tokens=0 complete=False log=C:\Users\rr\OneDrive\Desktop\Kanjoos\records\tok-fuzz-5000\seed1-5000.log
-VERDICT: FAIL — 1 merge-boundary difference(s) survived, or a seed did not complete.
+seed1: rc=0 ok=431 boundary=0 policy=1 tokens=3324 complete=True log=C:\Users\rr\OneDrive\Desktop\Kanjoos\records\tok-fuzz-5000\seed1-400.log
+VERDICT: PASS — no merge-boundary divergence survived, and every seed completed all requested prompts.

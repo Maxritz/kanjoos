@@ -1,0 +1,167 @@
+{
+  "oracle": "tools/ggufmeta/qwen35_oracle.py",
+  "file": "G:\\More-models\\ThinkingCap-Qwen3.8-27B-Q4_K_M.gguf",
+  "arch": "qwen35",
+  "layer": 4,
+  "layer_kind": "recurrent",
+  "tokens": [
+    760,
+    6511,
+    314,
+    9338,
+    369
+  ],
+  "token_strings": null,
+  "reshape": "dims[0] is the fast axis in memory",
+  "dequant_crosscheck_vs_gguf_py": [
+    {
+      "type": "F32",
+      "tensor": "output_norm.weight",
+      "blocks": 8,
+      "max_abs_diff_vs_gguf_py": 0.0,
+      "status": "identical"
+    },
+    {
+      "type": "Q4_0",
+      "tensor": "blk.64.attn_k.weight",
+      "blocks": 8,
+      "max_abs_diff_vs_gguf_py": 0.0,
+      "status": "identical"
+    },
+    {
+      "type": "Q8_0",
+      "tensor": "blk.0.attn_gate.weight",
+      "blocks": 8,
+      "max_abs_diff_vs_gguf_py": 0.0,
+      "status": "identical"
+    },
+    {
+      "type": "Q4_K",
+      "tensor": "token_embd.weight",
+      "blocks": 8,
+      "max_abs_diff_vs_gguf_py": 0.0,
+      "status": "identical"
+    },
+    {
+      "type": "Q5_K",
+      "tensor": "blk.51.ffn_down.weight",
+      "blocks": 8,
+      "max_abs_diff_vs_gguf_py": 0.0,
+      "status": "identical"
+    },
+    {
+      "type": "Q6_K",
+      "tensor": "output.weight",
+      "blocks": 8,
+      "max_abs_diff_vs_gguf_py": 0.0,
+      "status": "identical"
+    }
+  ],
+  "vectors": [
+    {
+      "name": "layer_x",
+      "shape": [
+        25600
+      ],
+      "file": "layer_x.f32"
+    },
+    {
+      "name": "layer_qkv",
+      "shape": [
+        51200
+      ],
+      "file": "layer_qkv.f32"
+    },
+    {
+      "name": "layer_conv_raw",
+      "shape": [
+        51200
+      ],
+      "file": "layer_conv_raw.f32"
+    },
+    {
+      "name": "layer_conv_silu",
+      "shape": [
+        51200
+      ],
+      "file": "layer_conv_silu.f32"
+    },
+    {
+      "name": "layer_q_l2",
+      "shape": [
+        10240
+      ],
+      "file": "layer_q_l2.f32"
+    },
+    {
+      "name": "layer_k_l2",
+      "shape": [
+        10240
+      ],
+      "file": "layer_k_l2.f32"
+    },
+    {
+      "name": "layer_beta",
+      "shape": [
+        240
+      ],
+      "file": "layer_beta.f32"
+    },
+    {
+      "name": "layer_g",
+      "shape": [
+        240
+      ],
+      "file": "layer_g.f32"
+    },
+    {
+      "name": "layer_o",
+      "shape": [
+        30720
+      ],
+      "file": "layer_o.f32"
+    },
+    {
+      "name": "layer_state",
+      "shape": [
+        786432
+      ],
+      "file": "layer_state.f32"
+    },
+    {
+      "name": "layer_gated",
+      "shape": [
+        30720
+      ],
+      "file": "layer_gated.f32"
+    },
+    {
+      "name": "layer_out",
+      "shape": [
+        25600
+      ],
+      "file": "layer_out.f32"
+    }
+  ],
+  "mode": "recurrent_layer",
+  "ssm": {
+    "num_k_heads": 16,
+    "num_v_heads": 48,
+    "head_dim": 128,
+    "conv_kernel": 4,
+    "value_dim": 6144,
+    "conv_dim": 10240
+  },
+  "reading": {
+    "ssm_a": "stored as -exp(A_log): g = ssm_a * softplus(alpha + dt_bias)",
+    "conv": "causal depthwise conv1d over the fused qkv, then SiLU",
+    "qkv_order": "[q_all | k_all | v_all]",
+    "qk_norm": "l2norm per head (eps), q scaled by 1/sqrt(head_dim)",
+    "source": "transformers Qwen3NextGatedDeltaNet + llama.cpp src/models/qwen35.cpp and ggml-cpu gated_delta_net"
+  },
+  "steps": 5,
+  "notes": {
+    "delta-rule scale": "1/sqrt(head_k_dim) = 0.088388",
+    "decay per token": "exp(g) in [0.000000, 0.999997]"
+  }
+}

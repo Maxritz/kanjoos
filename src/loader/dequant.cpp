@@ -87,6 +87,42 @@ void dequant_q4_k(const uint8_t* src, float* dst, uint64_t n) {
   }
 }
 
+// block_q5_K: { half d; half dmin; uint8 scales[12]; uint8 qh[32]; uint8 qs[128]; } = 176 B
+//
+// Eight 32-weight sub-blocks, and the fifth bit of weight w lives in
+// qh[w % 32] at bit (w / 32): the 32 qh bytes carry exactly one bit per weight,
+// which is where the 5 in Q5_K comes from. That bit mapping was DERIVED from
+// gguf-py's decoder on this machine's own Q5_K tensors (recover the integer q
+// from gguf-py's output, then match it against the raw bytes) and is verified
+// byte-for-byte against gguf-py by tools/dequant_crosscheck.py -- it is not a
+// transcription from memory. The scale/min packing is Q4_K's get_scale_min_k4.
+void dequant_q5_k(const uint8_t* src, float* dst, uint64_t n) {
+  const uint64_t nb = n / 256;
+  for (uint64_t i = 0; i < nb; ++i) {
+    const float d    = fp16_to_fp32(rd16(src + 0));
+    const float dmin = fp16_to_fp32(rd16(src + 2));
+    const uint8_t* scales = src + 4;
+    const uint8_t* qh = src + 16;
+    const uint8_t* qs = src + 48;
+
+    for (int sb = 0; sb < 8; ++sb) {
+      uint8_t sc, m;
+      get_scale_min_k4(sb, scales, &sc, &m);
+      const float d1  = d * (float)sc;
+      const float dm1 = dmin * (float)m;
+      const uint8_t* q = qs + (sb / 2) * 32;
+      const bool high = (sb & 1) != 0;
+      for (int l = 0; l < 32; ++l) {
+        const int lo = high ? (int)(q[l] >> 4) : (int)(q[l] & 0x0F);
+        const int hi = (int)((qh[l] >> sb) & 1);
+        dst[l] = d1 * (float)(lo | (hi << 4)) - dm1;
+      }
+      dst += 32;
+    }
+    src += 176;
+  }
+}
+
 // block_q6_K: { uint8 ql[128]; uint8 qh[64]; int8 scales[16]; half d; } = 210 B
 void dequant_q6_k(const uint8_t* src, float* dst, uint64_t n) {
   const uint64_t nb = n / 256;
@@ -312,6 +348,10 @@ void dequant_row_f32(GgmlType type, const uint8_t* src, float* dst, uint64_t n) 
     case GgmlType::Q4_K:
       if (n % 256) fail("Q4_K run is not a multiple of 256");
       dequant_q4_k(src, dst, n);
+      return;
+    case GgmlType::Q5_K:
+      if (n % 256) fail("Q5_K run is not a multiple of 256");
+      dequant_q5_k(src, dst, n);
       return;
     case GgmlType::Q6_K:
       if (n % 256) fail("Q6_K run is not a multiple of 256");

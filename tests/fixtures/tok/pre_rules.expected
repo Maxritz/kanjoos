@@ -1,0 +1,21 @@
+# tests/fixtures/tok/pre_rules.expected
+# Re-derived from the reference's ACTUAL regexes -- do not edit by hand.
+# generator  : python tools/tok_pre_rules.py --emit tests/fixtures/tok/pre_rules.expected
+# reference  : C:/Users/rr/OneDrive/Desktop/dxl/llama.cpp\src\llama-vocab.cpp
+#              sha256 a3e72f8ac3c919fa60437c5f3d9b0429276ef6eea68386765ac82ae696127878
+# anchors    : qwen2  sha256 c44a912d90a3fa0951a201b559433f35d8816c26b4be8b3cbd00670bcd985398
+#              qwen35 sha256 0ba0b8d2193a499569e78415a961afcb4ba6c8cec8b13ea85b057b7732804407
+# oracle     : C:/Users/rr/OneDrive/Desktop/dxl/llama.cpp\build\bin\llama.dll
+#
+# The dispatch test asserts SET EQUALITY against knj::known_pre_names(),
+# so a name on one side without the other fails the suite.
+deepseek-r1-qwen qwen2
+f2llmv2 qwen2
+grok-2 qwen2
+hunyuan qwen2
+kormo qwen2
+megrez qwen2
+qwen2 qwen2
+solar-open qwen2
+stablelm2 qwen2
+qwen35 qwen35

@@ -4,7 +4,10 @@ A C++/HIP inference engine that runs Mixture-of-Experts models whose expert
 weights do not fit in VRAM, by streaming them through a three-tier residency
 system and predicting far enough ahead to hide the transfer.
 
-**Targets:** RDNA4 `gfx1201` and RDNA2 `gfx1031`, on **Windows 11** and
+**Targets:** **RDNA4 `gfx1201` is the primary target** — and, on this machine,
+the only one that can execute. RDNA2 `gfx1031` is a *declared* second target and
+**future work**: it is compiled and censused, never the default, and no current
+result is gated on it. Both are planned for **Windows 11** and
 **Linux**, with ROCm 10.1.
 **VRAM profiles:** 6 / 8 / 12 / 16 GiB. **RAM profiles:** 16 / 24 / 32 / 48 /
 64 / 96 GiB.

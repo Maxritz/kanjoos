@@ -1,0 +1,237 @@
+{
+  "oracle": "tools/ggufmeta/qwen35_oracle.py",
+  "file": "G:\\More-models\\ThinkingCap-Qwen3.8-27B-Q4_K_M.gguf",
+  "arch": "qwen35",
+  "layer": 63,
+  "layer_kind": "attention",
+  "tokens": [
+    760,
+    6511,
+    314,
+    9338,
+    369
+  ],
+  "token_strings": null,
+  "reshape": "dims[0] is the fast axis in memory",
+  "dequant_crosscheck_vs_gguf_py": [
+    {
+      "type": "F32",
+      "tensor": "output_norm.weight",
+      "blocks": 8,
+      "max_abs_diff_vs_gguf_py": 0.0,
+      "status": "identical"
+    },
+    {
+      "type": "Q4_0",
+      "tensor": "blk.64.attn_k.weight",
+      "blocks": 8,
+      "max_abs_diff_vs_gguf_py": 0.0,
+      "status": "identical"
+    },
+    {
+      "type": "Q8_0",
+      "tensor": "blk.0.attn_gate.weight",
+      "blocks": 8,
+      "max_abs_diff_vs_gguf_py": 0.0,
+      "status": "identical"
+    },
+    {
+      "type": "Q4_K",
+      "tensor": "token_embd.weight",
+      "blocks": 8,
+      "max_abs_diff_vs_gguf_py": 0.0,
+      "status": "identical"
+    },
+    {
+      "type": "Q5_K",
+      "tensor": "blk.51.ffn_down.weight",
+      "blocks": 8,
+      "max_abs_diff_vs_gguf_py": 0.0,
+      "status": "identical"
+    },
+    {
+      "type": "Q6_K",
+      "tensor": "output.weight",
+      "blocks": 8,
+      "max_abs_diff_vs_gguf_py": 0.0,
+      "status": "identical"
+    }
+  ],
+  "vectors": [
+    {
+      "name": "embed_760",
+      "shape": [
+        5120
+      ],
+      "file": "embed_760.f32"
+    },
+    {
+      "name": "embed_6511",
+      "shape": [
+        5120
+      ],
+      "file": "embed_6511.f32"
+    },
+    {
+      "name": "embed_314",
+      "shape": [
+        5120
+      ],
+      "file": "embed_314.f32"
+    },
+    {
+      "name": "embed_9338",
+      "shape": [
+        5120
+      ],
+      "file": "embed_9338.f32"
+    },
+    {
+      "name": "embed_369",
+      "shape": [
+        5120
+      ],
+      "file": "embed_369.f32"
+    },
+    {
+      "name": "xnorm_760",
+      "shape": [
+        5120
+      ],
+      "file": "xnorm_760.f32"
+    },
+    {
+      "name": "xnorm_6511",
+      "shape": [
+        5120
+      ],
+      "file": "xnorm_6511.f32"
+    },
+    {
+      "name": "xnorm_314",
+      "shape": [
+        5120
+      ],
+      "file": "xnorm_314.f32"
+    },
+    {
+      "name": "xnorm_9338",
+      "shape": [
+        5120
+      ],
+      "file": "xnorm_9338.f32"
+    },
+    {
+      "name": "xnorm_369",
+      "shape": [
+        5120
+      ],
+      "file": "xnorm_369.f32"
+    },
+    {
+      "name": "q_760",
+      "shape": [
+        12288
+      ],
+      "file": "q_760.f32"
+    },
+    {
+      "name": "k_760",
+      "shape": [
+        1024
+      ],
+      "file": "k_760.f32"
+    },
+    {
+      "name": "v_760",
+      "shape": [
+        1024
+      ],
+      "file": "v_760.f32"
+    },
+    {
+      "name": "q_6511",
+      "shape": [
+        12288
+      ],
+      "file": "q_6511.f32"
+    },
+    {
+      "name": "k_6511",
+      "shape": [
+        1024
+      ],
+      "file": "k_6511.f32"
+    },
+    {
+      "name": "v_6511",
+      "shape": [
+        1024
+      ],
+      "file": "v_6511.f32"
+    },
+    {
+      "name": "q_314",
+      "shape": [
+        12288
+      ],
+      "file": "q_314.f32"
+    },
+    {
+      "name": "k_314",
+      "shape": [
+        1024
+      ],
+      "file": "k_314.f32"
+    },
+    {
+      "name": "v_314",
+      "shape": [
+        1024
+      ],
+      "file": "v_314.f32"
+    },
+    {
+      "name": "q_9338",
+      "shape": [
+        12288
+      ],
+      "file": "q_9338.f32"
+    },
+    {
+      "name": "k_9338",
+      "shape": [
+        1024
+      ],
+      "file": "k_9338.f32"
+    },
+    {
+      "name": "v_9338",
+      "shape": [
+        1024
+      ],
+      "file": "v_9338.f32"
+    },
+    {
+      "name": "q_369",
+      "shape": [
+        12288
+      ],
+      "file": "q_369.f32"
+    },
+    {
+      "name": "k_369",
+      "shape": [
+        1024
+      ],
+      "file": "k_369.f32"
+    },
+    {
+      "name": "v_369",
+      "shape": [
+        1024
+      ],
+      "file": "v_369.f32"
+    }
+  ]
+}

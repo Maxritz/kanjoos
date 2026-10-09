@@ -1,0 +1,202 @@
+{
+  "oracle": "tools/ggufmeta/qwen35_oracle.py",
+  "file": "G:\\More-models\\ThinkingCap-Qwen3.8-27B-Q4_K_M.gguf",
+  "arch": "qwen35",
+  "layer": 0,
+  "layer_kind": "recurrent",
+  "tokens": [
+    760,
+    6511,
+    314,
+    9338,
+    369
+  ],
+  "token_strings": null,
+  "reshape": "dims[0] is the fast axis in memory",
+  "dequant_crosscheck_vs_gguf_py": [
+    {
+      "type": "F32",
+      "tensor": "output_norm.weight",
+      "blocks": 8,
+      "max_abs_diff_vs_gguf_py": 0.0,
+      "status": "identical"
+    },
+    {
+      "type": "Q4_0",
+      "tensor": "blk.64.attn_k.weight",
+      "blocks": 8,
+      "max_abs_diff_vs_gguf_py": 0.0,
+      "status": "identical"
+    },
+    {
+      "type": "Q8_0",
+      "tensor": "blk.0.attn_gate.weight",
+      "blocks": 8,
+      "max_abs_diff_vs_gguf_py": 0.0,
+      "status": "identical"
+    },
+    {
+      "type": "Q4_K",
+      "tensor": "token_embd.weight",
+      "blocks": 8,
+      "max_abs_diff_vs_gguf_py": 0.0,
+      "status": "identical"
+    },
+    {
+      "type": "Q5_K",
+      "tensor": "blk.51.ffn_down.weight",
+      "blocks": 8,
+      "max_abs_diff_vs_gguf_py": 0.0,
+      "status": "identical"
+    },
+    {
+      "type": "Q6_K",
+      "tensor": "output.weight",
+      "blocks": 8,
+      "max_abs_diff_vs_gguf_py": 0.0,
+      "status": "identical"
+    }
+  ],
+  "vectors": [
+    {
+      "name": "embed_760",
+      "shape": [
+        5120
+      ],
+      "file": "embed_760.f32"
+    },
+    {
+      "name": "embed_6511",
+      "shape": [
+        5120
+      ],
+      "file": "embed_6511.f32"
+    },
+    {
+      "name": "embed_314",
+      "shape": [
+        5120
+      ],
+      "file": "embed_314.f32"
+    },
+    {
+      "name": "embed_9338",
+      "shape": [
+        5120
+      ],
+      "file": "embed_9338.f32"
+    },
+    {
+      "name": "embed_369",
+      "shape": [
+        5120
+      ],
+      "file": "embed_369.f32"
+    },
+    {
+      "name": "xnorm_760",
+      "shape": [
+        5120
+      ],
+      "file": "xnorm_760.f32"
+    },
+    {
+      "name": "xnorm_6511",
+      "shape": [
+        5120
+      ],
+      "file": "xnorm_6511.f32"
+    },
+    {
+      "name": "xnorm_314",
+      "shape": [
+        5120
+      ],
+      "file": "xnorm_314.f32"
+    },
+    {
+      "name": "xnorm_9338",
+      "shape": [
+        5120
+      ],
+      "file": "xnorm_9338.f32"
+    },
+    {
+      "name": "xnorm_369",
+      "shape": [
+        5120
+      ],
+      "file": "xnorm_369.f32"
+    },
+    {
+      "name": "qkv_760",
+      "shape": [
+        10240
+      ],
+      "file": "qkv_760.f32"
+    },
+    {
+      "name": "gate_760",
+      "shape": [
+        6144
+      ],
+      "file": "gate_760.f32"
+    },
+    {
+      "name": "qkv_6511",
+      "shape": [
+        10240
+      ],
+      "file": "qkv_6511.f32"
+    },
+    {
+      "name": "gate_6511",
+      "shape": [
+        6144
+      ],
+      "file": "gate_6511.f32"
+    },
+    {
+      "name": "qkv_314",
+      "shape": [
+        10240
+      ],
+      "file": "qkv_314.f32"
+    },
+    {
+      "name": "gate_314",
+      "shape": [
+        6144
+      ],
+      "file": "gate_314.f32"
+    },
+    {
+      "name": "qkv_9338",
+      "shape": [
+        10240
+      ],
+      "file": "qkv_9338.f32"
+    },
+    {
+      "name": "gate_9338",
+      "shape": [
+        6144
+      ],
+      "file": "gate_9338.f32"
+    },
+    {
+      "name": "qkv_369",
+      "shape": [
+        10240
+      ],
+      "file": "qkv_369.f32"
+    },
+    {
+      "name": "gate_369",
+      "shape": [
+        6144
+      ],
+      "file": "gate_369.f32"
+    }
+  ]
+}

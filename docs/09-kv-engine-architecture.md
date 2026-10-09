@@ -337,10 +337,11 @@ importance:
 >
 > 1. **A quantising codec cannot be bit-identical to full precision.** FP8
 >    truncation of a bf16 value changes it by construction. So I7 is
->    **re-scoped**: *tier movement* is bit-identical — the storage-layer codec
->    that moves a page between tiers must be lossless, `decode(encode(x)) == x`
->    bit for bit. A codec that changes values is a **precision reduction**:
->    declared, priced, recorded per page, and never conflated with a move.
+>    **re-scoped**: *tier movement* is bit-identical — the **lossless** storage-layer
+>    codec (a page read back as exactly the bytes it was written, with no quantisation)
+>    that moves a page between tiers must satisfy `decode(encode(x)) == x` bit for bit.
+>    A quantising KV codec that changes values is a **declared precision reduction**:
+>    declared, priced, recorded per page, and never conflated with a tier move.
 > 2. **Bit-identity needs a canonical reduction order, and the obvious
 >    implementation does not have one.** FP addition is not associative, so a
 >    single running accumulator and per-page partials merged left-to-right

@@ -139,6 +139,16 @@ const char* ggml_type_name(GgmlType t) {
     case GgmlType::Q5_K: return "Q5_K";
     case GgmlType::Q6_K: return "Q6_K";
     case GgmlType::Q8_K: return "Q8_K";
+    case GgmlType::IQ2_XXS: return "IQ2_XXS";
+    case GgmlType::IQ2_XS:  return "IQ2_XS";
+    case GgmlType::IQ3_XXS: return "IQ3_XXS";
+    case GgmlType::IQ1_S:   return "IQ1_S";
+    case GgmlType::IQ4_NL:  return "IQ4_NL";
+    case GgmlType::IQ3_S:   return "IQ3_S";
+    case GgmlType::IQ2_S:   return "IQ2_S";
+    case GgmlType::IQ4_XS:  return "IQ4_XS";
+    case GgmlType::IQ1_M:   return "IQ1_M";
+    case GgmlType::MXFP4:   return "MXFP4";
     case GgmlType::I8:   return "I8";
     case GgmlType::I16:  return "I16";
     case GgmlType::I32:  return "I32";
@@ -166,13 +176,24 @@ size_t ggml_type_block_weights(GgmlType t) {
     case GgmlType::Q5_1:
     case GgmlType::Q8_0:
     case GgmlType::Q8_1: return 32;
-    // K-quants are 256-weight superblocks.
+    // IQ4_NL is the one IQ type with 32-weight blocks; MXFP4 is 32 too.
+    case GgmlType::IQ4_NL:
+    case GgmlType::MXFP4: return 32;
+    // K-quants and the rest of the IQ family are 256-weight superblocks.
     case GgmlType::Q2_K:
     case GgmlType::Q3_K:
     case GgmlType::Q4_K:
     case GgmlType::Q5_K:
     case GgmlType::Q6_K:
-    case GgmlType::Q8_K: return 256;
+    case GgmlType::Q8_K:
+    case GgmlType::IQ2_XXS:
+    case GgmlType::IQ2_XS:
+    case GgmlType::IQ3_XXS:
+    case GgmlType::IQ1_S:
+    case GgmlType::IQ3_S:
+    case GgmlType::IQ2_S:
+    case GgmlType::IQ4_XS:
+    case GgmlType::IQ1_M: return 256;
     default:             fail("unknown ggml type has no block size");
   }
 }
@@ -200,6 +221,21 @@ size_t ggml_type_block_bytes(GgmlType t) {
     case GgmlType::Q5_K: return 2 + 2 + 12 + 32 + 128;
     case GgmlType::Q6_K: return 2 + 128 + 64 + 16;
     case GgmlType::Q8_K: return 4 + 256 + 16;
+    // The IQ family and MXFP4: sizes taken from gguf-py's GGML_QUANT_SIZES
+    // (`python -c "from gguf.constants import GGML_QUANT_SIZES as Q; print(Q)"`),
+    // not from memory. The engine has no decoder for any of them (see
+    // ggml_type_is_dequantizable); the sizes exist so the container can be read
+    // and the refusal can name the type per tensor.
+    case GgmlType::IQ2_XXS: return 66;
+    case GgmlType::IQ2_XS:  return 74;
+    case GgmlType::IQ3_XXS: return 98;
+    case GgmlType::IQ1_S:   return 50;
+    case GgmlType::IQ4_NL:  return 18;
+    case GgmlType::IQ3_S:   return 110;
+    case GgmlType::IQ2_S:   return 82;
+    case GgmlType::IQ4_XS:  return 136;
+    case GgmlType::IQ1_M:   return 56;
+    case GgmlType::MXFP4:   return 17;
     default:             fail("unknown ggml type has no block bytes");
   }
 }
@@ -212,6 +248,7 @@ bool ggml_type_is_dequantizable(GgmlType t) {
     case GgmlType::Q4_0:
     case GgmlType::Q8_0:
     case GgmlType::Q4_K:
+    case GgmlType::Q5_K:
     case GgmlType::Q6_K:
       return true;
     default:

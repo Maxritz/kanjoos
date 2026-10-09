@@ -1,0 +1,24 @@
+engine        : C:\Users\rr\OneDrive\Desktop\Kanjoos\build\cmake-host\kanjoos-run.exe
+llama.cpp     : C:/Users/rr/OneDrive/Desktop/dxl/llama.cpp/build/bin/llama-tokenize.exe
+model         : C:/Users/rr/OneDrive/Desktop/kraken/models/Qwen3-MOE-4x0.6B-2.4B-Q4_K_M.gguf
+strings       : 15 (each written to a file and read with --prompt-file / -f)
+
+string                                        engine   llama   llama  verdict
+                                                 ids   parse     raw  
+tok_crosscheck: the engine printed no 'id(s):' line for C:\Users\rr\OneDrive\Desktop\Kanjoos\build\cmake-host\tok_cc_tmp\s00.txt (rc 0)
+stdout:
+024 heads=16/8 head_dim=128 q_dim=2048 kv_dim=1024
+  experts=4 top_k=2 expert_ff=3072 vocab=151936 ctx_train=40960
+  rms_eps=1e-06 rope_base=1e+06 rope=split-halves (ggml NEOX)
+tokenizer  : vocab 151936, bos 151643, eos 151645, add_bos 0
+prompt     : 5 tokens, round-trip "The capital of France is"
+
+prompt     : The capital of France is
+completion :  Paris. The capital of Italy is Rome. The capital of Spain is Madrid. The capital of Portugal is Lisbon. The capital of France is Paris. The capital of Spain is Madrid. The capital of Portugal is Lisbon. The capital of Spain is Madrid. The capital of Portugal is Lisbon. The capital of Spain is Madrid
+
+-- measured --
+prefill    : 5 tokens in   392.71 ms       12.73 tok/s
+decode     : 64 tokens in  7497.62 ms        8.54 tok/s  (117.150 ms/token)
+
+stderr:
+

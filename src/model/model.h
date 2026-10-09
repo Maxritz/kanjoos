@@ -118,7 +118,9 @@ class Model {
   void rope(float* v, int n_head, int pos);
   void softmax(float* v, int n);
 
-  void moe(const Layer& w, const float* hx, int m, float* out);
+  // `layer` is carried only so the C21 scopes inside can name themselves
+  // `moe-gate:12`; it is not a parameter of the computation.
+  void moe(const Layer& w, const float* hx, int m, float* out, int layer);
 
   GgufFile file_;
   Tokenizer tok_;

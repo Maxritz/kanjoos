@@ -1,0 +1,1000 @@
+{
+  "oracle": "tools/ggufmeta/qwen35_oracle.py",
+  "file": "G:\\More-models\\ThinkingCap-Qwen3.8-27B-Q4_K_M.gguf",
+  "arch": "qwen35",
+  "layer": 0,
+  "layer_kind": "recurrent",
+  "tokens": [
+    760,
+    6511
+  ],
+  "token_strings": null,
+  "reshape": "dims[0] is the fast axis in memory",
+  "dequant_crosscheck_vs_gguf_py": [
+    {
+      "type": "F32",
+      "tensor": "output_norm.weight",
+      "blocks": 8,
+      "max_abs_diff_vs_gguf_py": 0.0,
+      "status": "identical"
+    },
+    {
+      "type": "Q4_0",
+      "tensor": "blk.64.attn_k.weight",
+      "blocks": 8,
+      "max_abs_diff_vs_gguf_py": 0.0,
+      "status": "identical"
+    },
+    {
+      "type": "Q8_0",
+      "tensor": "blk.0.attn_gate.weight",
+      "blocks": 8,
+      "max_abs_diff_vs_gguf_py": 0.0,
+      "status": "identical"
+    },
+    {
+      "type": "Q4_K",
+      "tensor": "token_embd.weight",
+      "blocks": 8,
+      "max_abs_diff_vs_gguf_py": 0.0,
+      "status": "identical"
+    },
+    {
+      "type": "Q5_K",
+      "tensor": "blk.51.ffn_down.weight",
+      "blocks": 8,
+      "max_abs_diff_vs_gguf_py": 0.0,
+      "status": "identical"
+    },
+    {
+      "type": "Q6_K",
+      "tensor": "output.weight",
+      "blocks": 8,
+      "max_abs_diff_vs_gguf_py": 0.0,
+      "status": "identical"
+    }
+  ],
+  "vectors": [
+    {
+      "name": "trunk_in",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_in.f32"
+    },
+    {
+      "name": "trunk_mix0",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_mix0.f32"
+    },
+    {
+      "name": "trunk_h0",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_h0.f32"
+    },
+    {
+      "name": "trunk_mix1",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_mix1.f32"
+    },
+    {
+      "name": "trunk_h1",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_h1.f32"
+    },
+    {
+      "name": "trunk_mix2",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_mix2.f32"
+    },
+    {
+      "name": "trunk_h2",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_h2.f32"
+    },
+    {
+      "name": "trunk_mix3",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_mix3.f32"
+    },
+    {
+      "name": "trunk_h3",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_h3.f32"
+    },
+    {
+      "name": "trunk_mix4",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_mix4.f32"
+    },
+    {
+      "name": "trunk_h4",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_h4.f32"
+    },
+    {
+      "name": "trunk_mix5",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_mix5.f32"
+    },
+    {
+      "name": "trunk_h5",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_h5.f32"
+    },
+    {
+      "name": "trunk_mix6",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_mix6.f32"
+    },
+    {
+      "name": "trunk_h6",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_h6.f32"
+    },
+    {
+      "name": "trunk_mix7",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_mix7.f32"
+    },
+    {
+      "name": "trunk_h7",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_h7.f32"
+    },
+    {
+      "name": "trunk_mix8",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_mix8.f32"
+    },
+    {
+      "name": "trunk_h8",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_h8.f32"
+    },
+    {
+      "name": "trunk_mix9",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_mix9.f32"
+    },
+    {
+      "name": "trunk_h9",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_h9.f32"
+    },
+    {
+      "name": "trunk_mix10",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_mix10.f32"
+    },
+    {
+      "name": "trunk_h10",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_h10.f32"
+    },
+    {
+      "name": "trunk_mix11",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_mix11.f32"
+    },
+    {
+      "name": "trunk_h11",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_h11.f32"
+    },
+    {
+      "name": "trunk_mix12",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_mix12.f32"
+    },
+    {
+      "name": "trunk_h12",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_h12.f32"
+    },
+    {
+      "name": "trunk_mix13",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_mix13.f32"
+    },
+    {
+      "name": "trunk_h13",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_h13.f32"
+    },
+    {
+      "name": "trunk_mix14",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_mix14.f32"
+    },
+    {
+      "name": "trunk_h14",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_h14.f32"
+    },
+    {
+      "name": "trunk_mix15",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_mix15.f32"
+    },
+    {
+      "name": "trunk_h15",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_h15.f32"
+    },
+    {
+      "name": "trunk_mix16",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_mix16.f32"
+    },
+    {
+      "name": "trunk_h16",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_h16.f32"
+    },
+    {
+      "name": "trunk_mix17",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_mix17.f32"
+    },
+    {
+      "name": "trunk_h17",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_h17.f32"
+    },
+    {
+      "name": "trunk_mix18",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_mix18.f32"
+    },
+    {
+      "name": "trunk_h18",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_h18.f32"
+    },
+    {
+      "name": "trunk_mix19",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_mix19.f32"
+    },
+    {
+      "name": "trunk_h19",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_h19.f32"
+    },
+    {
+      "name": "trunk_mix20",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_mix20.f32"
+    },
+    {
+      "name": "trunk_h20",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_h20.f32"
+    },
+    {
+      "name": "trunk_mix21",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_mix21.f32"
+    },
+    {
+      "name": "trunk_h21",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_h21.f32"
+    },
+    {
+      "name": "trunk_mix22",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_mix22.f32"
+    },
+    {
+      "name": "trunk_h22",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_h22.f32"
+    },
+    {
+      "name": "trunk_mix23",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_mix23.f32"
+    },
+    {
+      "name": "trunk_h23",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_h23.f32"
+    },
+    {
+      "name": "trunk_mix24",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_mix24.f32"
+    },
+    {
+      "name": "trunk_h24",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_h24.f32"
+    },
+    {
+      "name": "trunk_mix25",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_mix25.f32"
+    },
+    {
+      "name": "trunk_h25",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_h25.f32"
+    },
+    {
+      "name": "trunk_mix26",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_mix26.f32"
+    },
+    {
+      "name": "trunk_h26",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_h26.f32"
+    },
+    {
+      "name": "trunk_mix27",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_mix27.f32"
+    },
+    {
+      "name": "trunk_h27",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_h27.f32"
+    },
+    {
+      "name": "trunk_mix28",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_mix28.f32"
+    },
+    {
+      "name": "trunk_h28",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_h28.f32"
+    },
+    {
+      "name": "trunk_mix29",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_mix29.f32"
+    },
+    {
+      "name": "trunk_h29",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_h29.f32"
+    },
+    {
+      "name": "trunk_mix30",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_mix30.f32"
+    },
+    {
+      "name": "trunk_h30",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_h30.f32"
+    },
+    {
+      "name": "trunk_mix31",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_mix31.f32"
+    },
+    {
+      "name": "trunk_h31",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_h31.f32"
+    },
+    {
+      "name": "trunk_mix32",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_mix32.f32"
+    },
+    {
+      "name": "trunk_h32",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_h32.f32"
+    },
+    {
+      "name": "trunk_mix33",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_mix33.f32"
+    },
+    {
+      "name": "trunk_h33",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_h33.f32"
+    },
+    {
+      "name": "trunk_mix34",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_mix34.f32"
+    },
+    {
+      "name": "trunk_h34",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_h34.f32"
+    },
+    {
+      "name": "trunk_mix35",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_mix35.f32"
+    },
+    {
+      "name": "trunk_h35",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_h35.f32"
+    },
+    {
+      "name": "trunk_mix36",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_mix36.f32"
+    },
+    {
+      "name": "trunk_h36",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_h36.f32"
+    },
+    {
+      "name": "trunk_mix37",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_mix37.f32"
+    },
+    {
+      "name": "trunk_h37",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_h37.f32"
+    },
+    {
+      "name": "trunk_mix38",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_mix38.f32"
+    },
+    {
+      "name": "trunk_h38",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_h38.f32"
+    },
+    {
+      "name": "trunk_mix39",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_mix39.f32"
+    },
+    {
+      "name": "trunk_h39",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_h39.f32"
+    },
+    {
+      "name": "trunk_mix40",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_mix40.f32"
+    },
+    {
+      "name": "trunk_h40",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_h40.f32"
+    },
+    {
+      "name": "trunk_mix41",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_mix41.f32"
+    },
+    {
+      "name": "trunk_h41",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_h41.f32"
+    },
+    {
+      "name": "trunk_mix42",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_mix42.f32"
+    },
+    {
+      "name": "trunk_h42",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_h42.f32"
+    },
+    {
+      "name": "trunk_mix43",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_mix43.f32"
+    },
+    {
+      "name": "trunk_h43",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_h43.f32"
+    },
+    {
+      "name": "trunk_mix44",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_mix44.f32"
+    },
+    {
+      "name": "trunk_h44",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_h44.f32"
+    },
+    {
+      "name": "trunk_mix45",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_mix45.f32"
+    },
+    {
+      "name": "trunk_h45",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_h45.f32"
+    },
+    {
+      "name": "trunk_mix46",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_mix46.f32"
+    },
+    {
+      "name": "trunk_h46",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_h46.f32"
+    },
+    {
+      "name": "trunk_mix47",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_mix47.f32"
+    },
+    {
+      "name": "trunk_h47",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_h47.f32"
+    },
+    {
+      "name": "trunk_mix48",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_mix48.f32"
+    },
+    {
+      "name": "trunk_h48",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_h48.f32"
+    },
+    {
+      "name": "trunk_mix49",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_mix49.f32"
+    },
+    {
+      "name": "trunk_h49",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_h49.f32"
+    },
+    {
+      "name": "trunk_mix50",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_mix50.f32"
+    },
+    {
+      "name": "trunk_h50",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_h50.f32"
+    },
+    {
+      "name": "trunk_mix51",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_mix51.f32"
+    },
+    {
+      "name": "trunk_h51",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_h51.f32"
+    },
+    {
+      "name": "trunk_mix52",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_mix52.f32"
+    },
+    {
+      "name": "trunk_h52",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_h52.f32"
+    },
+    {
+      "name": "trunk_mix53",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_mix53.f32"
+    },
+    {
+      "name": "trunk_h53",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_h53.f32"
+    },
+    {
+      "name": "trunk_mix54",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_mix54.f32"
+    },
+    {
+      "name": "trunk_h54",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_h54.f32"
+    },
+    {
+      "name": "trunk_mix55",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_mix55.f32"
+    },
+    {
+      "name": "trunk_h55",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_h55.f32"
+    },
+    {
+      "name": "trunk_mix56",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_mix56.f32"
+    },
+    {
+      "name": "trunk_h56",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_h56.f32"
+    },
+    {
+      "name": "trunk_mix57",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_mix57.f32"
+    },
+    {
+      "name": "trunk_h57",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_h57.f32"
+    },
+    {
+      "name": "trunk_mix58",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_mix58.f32"
+    },
+    {
+      "name": "trunk_h58",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_h58.f32"
+    },
+    {
+      "name": "trunk_mix59",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_mix59.f32"
+    },
+    {
+      "name": "trunk_h59",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_h59.f32"
+    },
+    {
+      "name": "trunk_mix60",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_mix60.f32"
+    },
+    {
+      "name": "trunk_h60",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_h60.f32"
+    },
+    {
+      "name": "trunk_mix61",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_mix61.f32"
+    },
+    {
+      "name": "trunk_h61",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_h61.f32"
+    },
+    {
+      "name": "trunk_mix62",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_mix62.f32"
+    },
+    {
+      "name": "trunk_h62",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_h62.f32"
+    },
+    {
+      "name": "trunk_mix63",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_mix63.f32"
+    },
+    {
+      "name": "trunk_h63",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_h63.f32"
+    },
+    {
+      "name": "trunk_norm",
+      "shape": [
+        10240
+      ],
+      "file": "trunk_norm.f32"
+    },
+    {
+      "name": "trunk_logits",
+      "shape": [
+        496640
+      ],
+      "file": "trunk_logits.f32"
+    }
+  ],
+  "mode": "trunk",
+  "trunk": {
+    "n_layer_all": 65,
+    "nextn_predict_layers": 1,
+    "n_layer_main": 64,
+    "n_embd": 5120,
+    "n_ff": 17408,
+    "n_vocab": 248320
+  },
+  "reading": {
+    "layer order": "for il in [0, n_layer): inp = cur; cur = block(rmsnorm(cur, attn_norm[il])); cur = cur + inp; res = cur; cur = ffn(rmsnorm(cur, post_attention_norm[il])); cur = cur + res",
+    "nextn": "the MTP block (blk.64 here) is loaded as an extra decoder block and NOT executed in the main pass",
+    "ffn": "dense SwiGLU, no router (llama.cpp asserts ffn_gate_inp is null)",
+    "head": "output_norm then output.weight; no logit scaling, no softcap",
+    "source": "llama.cpp src/models/qwen35.cpp (the layer loop, build_layer_ffn, the output_norm + lm_head tail)"
+  },
+  "steps": 2,
+  "notes": {
+    "trunk": "64 causal layer(s) = block_count 65 - nextn_predict_layers 1; blk.64 carries the MTP tensors and is NOT in the main pass",
+    "trunk kinds": "48 recurrent (SSM) + 16 full attention",
+    "ffn": "dense SwiGLU, no router: down(silu(gate(x)) * up(x)), x = the post_attention_norm output",
+    "head": "output_norm + output.weight [5120, 248320] (untied), no scaling, no softcap",
+    "trunk argmax": "per position: [61748, 5581]"
+  }
+}

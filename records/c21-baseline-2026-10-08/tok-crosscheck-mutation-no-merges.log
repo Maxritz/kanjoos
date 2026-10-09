@@ -1,0 +1,111 @@
+engine        : C:\Users\rr\OneDrive\Desktop\Kanjoos\build\cmake-host\kanjoos-run.exe
+llama.cpp     : C:/Users/rr/OneDrive/Desktop/dxl/llama.cpp/build/bin/llama-tokenize.exe
+model         : C:/Users/rr/OneDrive/Desktop/kraken/models/Qwen3-MOE-4x0.6B-2.4B-Q4_K_M.gguf
+strings       : 25 (each written to a file and read with --prompt-file / -f)
+engine ids    : `--dump-tokens -n 0` (`prompt ids :`) or the qwen35 probe's `id(s):`, whichever this architecture prints
+
+string                                        engine   llama   llama  verdict
+                                                 ids   parse     raw  
+The capital of France is                          24       5       5  FAIL first difference at index 0
+      engine     [51, 71, 68, 220, 66, 64, 79, 72, 83, 64, 75, 220, 78, 69] ...
+      llama ()   [785, 6722, 315, 9625, 374]
+      llama raw  [785, 6722, 315, 9625, 374]
+hello world                                       11       2       2  FAIL first difference at index 0
+      engine     [71, 68, 75, 75, 78, 220, 86, 78, 81, 75, 67]
+      llama ()   [14990, 1879]
+      llama raw  [14990, 1879]
+1 2 3 123 1234 3.14159 -0.5                       27      26      26  FAIL first difference at index 22
+      engine     [16, 220, 17, 220, 18, 220, 16, 17, 18, 220, 16, 17, 18, 19] ...
+      llama ()   [16, 220, 17, 220, 18, 220, 16, 17, 18, 220, 16, 17, 18, 19] ...
+      llama raw  [16, 220, 17, 220, 18, 220, 16, 17, 18, 220, 16, 17, 18, 19] ...
+  leading and   multiple    spaces                34       7       7  FAIL first difference at index 1
+      engine     [220, 220, 75, 68, 64, 67, 72, 77, 70, 220, 64, 77, 67, 220] ...
+      llama ()   [220, 6388, 323, 256, 5248, 262, 12621]
+      llama raw  [220, 6388, 323, 256, 5248, 262, 12621]
+line1\nline2\n\nline3                             18       8       8  FAIL first difference at index 0
+      engine     [75, 72, 77, 68, 16, 198, 75, 72, 77, 68, 17, 198, 198, 75] ...
+      llama ()   [1056, 16, 198, 1056, 17, 271, 1056, 18]
+      llama raw  [1056, 16, 198, 1056, 17, 271, 1056, 18]
+日本語のテキスト                                          24       6       6  FAIL first difference at index 0
+      engine     [162, 245, 98, 162, 250, 105, 164, 103, 252, 159, 223, 106, 159, 225] ...
+      llama ()   [101059, 102819, 15767, 56833, 61803, 70534]
+      llama raw  [101059, 102819, 15767, 56833, 61803, 70534]
+emoji: 🚀🔥                                         15       6       6  FAIL first difference at index 0
+      engine     [68, 76, 78, 73, 72, 25, 220, 172, 253, 248, 222, 172, 253, 242] ...
+      llama ()   [37523, 25, 11162, 248, 222, 144670]
+      llama raw  [37523, 25, 11162, 248, 222, 144670]
+tab\there <|endoftext|>                           22       5       9  FAIL first difference at index 0
+      engine     [83, 64, 65, 197, 71, 68, 81, 68, 220, 27, 91, 68, 77, 67] ...
+      llama ()   [6192, 197, 6739, 220, 151643]
+      llama raw  [6192, 197, 6739, 82639, 8691, 723, 427, 91, 29]
+abc123def 0.5e-3 7zip A1B2C3                      28      21      21  FAIL first difference at index 0
+      engine     [64, 65, 66, 16, 17, 18, 67, 68, 69, 220, 15, 13, 20, 68] ...
+      llama ()   [13683, 16, 17, 18, 750, 220, 15, 13, 20, 68, 12, 18, 220, 22] ...
+      llama raw  [13683, 16, 17, 18, 750, 220, 15, 13, 20, 68, 12, 18, 220, 22] ...
+don't  it's  can't've  l'été                      30      13      13  FAIL first difference at index 0
+      engine     [67, 78, 77, 6, 83, 220, 220, 72, 83, 6, 82, 220, 220, 66] ...
+      llama ()   [15007, 944, 220, 432, 594, 220, 646, 944, 3003, 220, 326, 6, 38783]
+      llama raw  [15007, 944, 220, 432, 594, 220, 646, 944, 3003, 220, 326, 6, 38783]
+!!!!  ...  ---  ;;  (((                           23       9       9  FAIL first difference at index 0
+      engine     [0, 0, 0, 0, 220, 220, 13, 13, 13, 220, 220, 12, 12, 12] ...
+      llama ()   [17085, 220, 2503, 220, 12448, 220, 13667, 220, 11600]
+      llama raw  [17085, 220, 2503, 220, 12448, 220, 13667, 220, 11600]
+{ "key": [1,2,3], "n": null }                     29      16      16  FAIL first difference at index 1
+      engine     [90, 220, 1, 74, 68, 88, 1, 25, 220, 58, 16, 11, 17, 11] ...
+      llama ()   [90, 330, 792, 788, 508, 16, 11, 17, 11, 18, 1125, 330, 77, 788] ...
+      llama raw  [90, 330, 792, 788, 508, 16, 11, 17, 11, 18, 1125, 330, 77, 788] ...
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...        64       8       8  FAIL first difference at index 0
+      engine     [64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64] ...
+      llama ()   [69440, 69440, 69440, 69440, 69440, 69440, 69440, 69440]
+      llama raw  [69440, 69440, 69440, 69440, 69440, 69440, 69440, 69440]
+supercalifragilisticexpialidocious anti...        63      17      17  FAIL first difference at index 0
+      engine     [82, 84, 79, 68, 81, 66, 64, 75, 72, 69, 81, 64, 70, 72] ...
+      llama ()   [12776, 2962, 278, 333, 4101, 321, 4532, 4580, 530, 307, 77187, 3196, 84242, 33400] ...
+      llama raw  [12776, 2962, 278, 333, 4101, 321, 4532, 4580, 530, 307, 77187, 3196, 84242, 33400] ...
+mixed  mixed\tmixed\nmixed 😀 mixed                35       9       9  FAIL first difference at index 0
+      engine     [76, 72, 87, 68, 67, 220, 220, 76, 72, 87, 68, 67, 197, 76] ...
+      llama ()   [56685, 220, 9519, 2109, 3286, 198, 56685, 90316, 9519]
+      llama raw  [56685, 220, 9519, 2109, 3286, 198, 56685, 90316, 9519]
+a🚀b                                                6       3       3  FAIL first difference at index 1
+      engine     [64, 172, 253, 248, 222, 65]
+      llama ()   [64, 145836, 65]
+      llama raw  [64, 145836, 65]
+a—b                                                5       3       3  FAIL first difference at index 1
+      engine     [64, 158, 222, 242, 65]
+      llama ()   [64, 2293, 65]
+      llama raw  [64, 2293, 65]
+10–20                                              7       5       5  FAIL first difference at index 2
+      engine     [16, 15, 158, 222, 241, 17, 15]
+      llama ()   [16, 15, 4142, 17, 15]
+      llama raw  [16, 15, 4142, 17, 15]
+日本語、です                                            18       4       4  FAIL first difference at index 0
+      engine     [162, 245, 98, 162, 250, 105, 164, 103, 252, 159, 222, 223, 159, 223] ...
+      llama ()   [101059, 102819, 5373, 37541]
+      llama raw  [101059, 102819, 5373, 37541]
+a b                                                4       3       3  FAIL first difference at index 1
+      engine     [64, 126, 254, 65]
+      llama ()   [64, 4102, 65]
+      llama raw  [64, 4102, 65]
+héllo…world                                       14       5       5  FAIL first difference at index 1
+      engine     [71, 127, 102, 75, 75, 78, 158, 222, 99, 86, 78, 81, 75, 67]
+      llama ()   [71, 18503, 385, 1940, 14615]
+      llama raw  [71, 18503, 385, 1940, 14615]
+€100 £5                                           10       6       6  FAIL first difference at index 0
+      engine     [158, 224, 105, 16, 15, 15, 220, 126, 96, 20]
+      llama ()   [15056, 16, 15, 15, 6938, 20]
+      llama raw  [15056, 16, 15, 15, 6938, 20]
+emoji🚀fire🔥                                       17       4       4  FAIL first difference at index 0
+      engine     [68, 76, 78, 73, 72, 172, 253, 248, 222, 69, 72, 81, 68, 172] ...
+      llama ()   [37523, 145836, 10796, 144670]
+      llama raw  [37523, 145836, 10796, 144670]
+Ünïcödé tèxt                                      17       9       9  FAIL first difference at index 0
+      engine     [127, 250, 77, 127, 107, 66, 127, 114, 67, 127, 102, 220, 83, 127] ...
+      llama ()   [52491, 77, 37572, 66, 2956, 128505, 259, 4458, 2252]
+      llama raw  [52491, 77, 37572, 66, 2956, 128505, 259, 4458, 2252]
+x y                                                5       4       4  FAIL first difference at index 1
+      engine     [87, 158, 222, 231, 88]
+      llama ()   [87, 378, 231, 88]
+      llama raw  [87, 378, 231, 88]
+
+0/25 strings identical, 0 policy difference(s), 25 merge-boundary difference(s), 550 tokens compared
+VERDICT: FAIL -- a merge boundary differs from llama.cpp's on 25 string(s). The model would see different ids, so this is a defect in the engine's tokenizer or in the file's pre-tokeniser rule.

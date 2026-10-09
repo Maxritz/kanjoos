@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "src/model/model.h"
+#include "src/model/qwen35.h"
 #include "src/platform/memprobe.h"
 #include "src/profiler/profiler.h"
 
@@ -36,6 +37,7 @@ struct Args {
   float top_p = 0.95f;
   uint32_t seed = 1;
   bool dump_tokens = false;
+  bool tokenize_only = false;
   bool dump_logits = false;
   int top_logits = 8;
   bool bench = false;
@@ -52,6 +54,21 @@ struct Args {
   int profile_floor = 256;
   int profile_warmup = 8;
   bool profile_no_subtract = false;
+  // Prompt read from a UTF-8 file instead of argv. On Windows the process is
+  // handed its arguments in the *ANSI code page*, not UTF-8, so a CJK or emoji
+  // prompt arrives mangled -- or, when a conversion ends on a byte the CRT reads
+  // as a delimiter, as several arguments. A file is read as bytes and has no
+  // such step: `--prompt-file` is the interface for non-ASCII text.
+  std::string prompt_file;
+  // qwen35 probe (see src/model/qwen35.h). Not a forward pass: a front-end
+  // verification with an explicit refusal at the end.
+  std::string qwen35_ref;
+  std::string qwen35_tokens;
+  int qwen35_layer = 0;
+  double qwen35_rtol = 2e-3;
+  bool qwen35_recurrent = false;
+  bool qwen35_attention = false;
+  bool qwen35_forward = false;
 };
 
 void usage() {
@@ -60,6 +77,9 @@ void usage() {
       "\n"
       "  --model PATH      GGUF to load (required)\n"
       "  -p, --prompt TEXT prompt (raw completion, no chat template)\n"
+      "  --prompt-file F   read the prompt from a UTF-8 file instead (use this for\n"
+      "                    non-ASCII text: Windows gives argv in the ANSI code page,\n"
+      "                    so a CJK or emoji prompt cannot cross that boundary intact)\n"
       "  -n, --n-predict N tokens to generate (default 64)\n"
       "  --ctx N           KV cache size (default 2048)\n"
       "  --threads N       worker threads (default: hardware concurrency)\n"
@@ -68,13 +88,39 @@ void usage() {
       "  --top-p F         nucleus filter for temperature > 0 (default 0.95)\n"
       "  --seed N          RNG seed (default 1)\n"
       "  --dump-tokens     print the prompt's token ids\n"
+      "  --tokenize-only   print token ids and exit without a model forward pass\n"
       "  --dump-logits     print the top tokens at the first generated position\n"
       "  --bench PP TG     time a PP-token prefill and a TG-token decode run\n"
       "  --profiling[=FMT] profile the run: table (default), json, csv, no-subtract, off\n"
       "  --profile-dir DIR also write profile.{txt,json,csv} into DIR\n"
       "  --profile-floor N empty ops timed through the same begin/end path (default 256)\n"
       "  --profile-warmup N discard the first N steps (default 8)\n"
-      "  --profile-detail=D component detail: class (default), layer, kernel\n");
+      "  --profile-detail=D component detail: class (default), layer, kernel\n"
+      "\n"
+      "qwen35 (a different trunk, not a configuration of this one):\n"
+      "  --qwen35-ref DIR  compare full outputs against tools/ref_qwen35.py's oracle\n"
+      "  --qwen35-layer N  the layer whose input projections are verified (default 0)\n"
+      "  --qwen35-tokens L comma-separated token ids to run instead of tokenising\n"
+      "                    --prompt; the oracle is invoked with an explicit --tokens\n"
+      "                    list, so a comparison needs the same ids on both sides\n"
+      "  --qwen35-rtol F   comparison tolerance, relative to reference RMS (default 2e-3)\n"
+      "  --qwen35-recurrent  run the layer's GatedDeltaNet recurrence end to end:\n"
+      "                    conv1d state carry, the per-group delta rule and the\n"
+      "                    alpha/beta/ssm_a gating, compared as the 12 layer_* vectors\n"
+      "                    tools/ref_qwen35.py --recurrent writes (implies the layer\n"
+      "                    must be recurrent; a full-attention layer is refused)\n"
+      "  --qwen35-attention  run the layer's gated full attention end to end: the QG\n"
+      "                    split, QK-norm over head_dim, partial RoPE, causal softmax\n"
+      "                    and the sigmoid gate, compared as the 11 layer_* vectors\n"
+      "                    tools/ref_qwen35.py --attention writes (implies the layer\n"
+      "                    must be full attention; a recurrent layer is refused)\n"
+      "  --qwen35-forward    run the whole trunk -- all 64 causal layers in file order\n"
+      "                    (48 SSM + 16 attention), each with its residual; the dense\n"
+      "                    SwiGLU FFN; output_norm; and the untied 248320-wide head --\n"
+      "                    and compare the residual stream after every layer, the\n"
+      "                    head's input and the logits against tools/ref_qwen35.py\n"
+      "                    --forward. This path produces logits and exits 0 when it\n"
+      "                    verifies\n");
 }
 
 int32_t sample(const float* logits, int n_vocab, const Args& a, std::mt19937& rng) {
@@ -130,6 +176,7 @@ Args parse(int argc, char** argv) {
     };
     if (s == "--model") a.model = next();
     else if (s == "-p" || s == "--prompt") a.prompt = next();
+    else if (s == "--prompt-file") a.prompt_file = next();
     else if (s == "-n" || s == "--n-predict") a.n_predict = std::stoi(next());
     else if (s == "--ctx") a.n_ctx = std::stoi(next());
     else if (s == "--threads") a.threads = std::stoi(next());
@@ -138,8 +185,16 @@ Args parse(int argc, char** argv) {
     else if (s == "--top-p") a.top_p = std::stof(next());
     else if (s == "--seed") a.seed = (uint32_t)std::stoul(next());
     else if (s == "--dump-tokens") a.dump_tokens = true;
+    else if (s == "--tokenize-only") { a.dump_tokens = true; a.tokenize_only = true; }
     else if (s == "--dump-logits") a.dump_logits = true;
     else if (s == "--top-logits") a.top_logits = std::stoi(next());
+    else if (s == "--qwen35-ref") a.qwen35_ref = next();
+    else if (s == "--qwen35-tokens") a.qwen35_tokens = next();
+    else if (s == "--qwen35-layer") a.qwen35_layer = std::stoi(next());
+    else if (s == "--qwen35-rtol") a.qwen35_rtol = std::stod(next());
+    else if (s == "--qwen35-recurrent") a.qwen35_recurrent = true;
+    else if (s == "--qwen35-attention") a.qwen35_attention = true;
+    else if (s == "--qwen35-forward") a.qwen35_forward = true;
     else if (s == "--profile-dir") a.profile_dir = next();
     else if (s == "--profile-floor") a.profile_floor = std::stoi(next());
     else if (s == "--profile-warmup") a.profile_warmup = std::stoi(next());
@@ -227,7 +282,27 @@ void run_bench(Model& m, const Args& a) {
 
 int main(int argc, char** argv) {
   try {
-    const Args a = parse(argc, argv);
+    Args a = parse(argc, argv);
+    if (!a.prompt_file.empty()) {
+      // Bytes, not text: the file is the UTF-8 the caller wrote, and decoding is
+      // the tokenizer's job. A file that cannot be read is a named refusal.
+      std::FILE* f = std::fopen(a.prompt_file.c_str(), "rb");
+      if (!f) {
+        std::printf("error: --prompt-file cannot be opened: %s\n", a.prompt_file.c_str());
+        return 1;
+      }
+      std::string text;
+      char buf[4096];
+      size_t got = 0;
+      while ((got = std::fread(buf, 1, sizeof(buf), f)) > 0) text.append(buf, got);
+      const bool bad = std::ferror(f) != 0;
+      std::fclose(f);
+      if (bad) {
+        std::printf("error: --prompt-file failed while reading: %s\n", a.prompt_file.c_str());
+        return 1;
+      }
+      a.prompt = text;
+    }
     Model::Options opt;
     opt.n_ctx = a.n_ctx;
     opt.threads = a.threads;
@@ -247,6 +322,78 @@ int main(int argc, char** argv) {
     prof.configure(pc);
     prof.set_domain(knj::ClockDomain::Host);
     prof.measure_floor();
+
+    // Which architecture is this, before the forward pass decides what to do
+    // with it. `qwen35` is a different trunk (hybrid SSM + gated attention), not
+    // a configuration of `qwen3moe`, so it gets a front-end probe that verifies
+    // what can be verified and refuses the rest by name. `dflash` is a draft
+    // model for a target this engine cannot run yet; it is refused with the
+    // reason rather than with the generic architecture message.
+    {
+      std::string arch;
+      try {
+        knj::GgufFile sniff = knj::GgufFile::open(a.model);
+        if (sniff.has("general.architecture")) {
+          arch = sniff.meta_string("general.architecture");
+        }
+      } catch (const std::exception& e) {
+        std::printf("model      : %s\n", a.model.c_str());
+        std::printf("REFUSED    : the container could not be read: %s\n", e.what());
+        std::printf("             Nothing was measured. tools/ggufmeta/gguf_meta.py reads\n"
+                    "             the same file and prints its header and tensor table.\n");
+        return 3;
+      }
+      if (arch == "qwen35" && a.tokenize_only) {
+        // The qwen35 probe normally returns 3 after its front-end report because
+        // it does not produce logits. Tokenizer cross-checks need an honest 0
+        // from tokenization alone, without entering that probe or its forward path.
+        try {
+          const knj::GgufFile file = knj::GgufFile::open(a.model);
+          const knj::Tokenizer tok = knj::Tokenizer::from_gguf(file);
+          const std::vector<int32_t> ids = tok.encode(a.prompt, false);
+          std::printf("probe text \\\"%s\\\" -> %zu id(s):", a.prompt.c_str(), ids.size());
+          for (int32_t id : ids) std::printf(" %d", id);
+          std::printf("\\n");
+          return 0;
+        } catch (const std::exception& e) {
+          std::fprintf(stderr, "error: %s\\n", e.what());
+          return 1;
+        }
+      }
+      if (arch == "qwen35") {
+        knj::Qwen35ProbeOptions q;
+        q.model = a.model;
+        q.ref_dir = a.qwen35_ref;
+        q.tokens = a.qwen35_tokens;
+        q.layer = a.qwen35_layer;
+        q.rtol = a.qwen35_rtol;
+        q.recurrent = a.qwen35_recurrent;
+        q.attention = a.qwen35_attention;
+        q.forward = a.qwen35_forward;
+        q.text = a.prompt;
+        const int rc = knj::run_qwen35_probe(q);
+        if (a.profiling) {
+          knj::Profiler& p = knj::Profiler::get();
+          p.print_header(stdout, "0.1.0",
+                         "qwen35 front-end probe (no device backend)",
+                         "vram NOT MEASURED here   ram NOT MEASURED here");
+          p.report(stdout);
+          p.write_dir();
+        }
+        return rc;
+      }
+      if (arch == "dflash") {
+        std::printf("model      : %s\n", a.model.c_str());
+        std::printf("REFUSED    : architecture 'dflash' is a *draft* model, not a language\n"
+                    "             model. It carries no token_embd and no output.weight: it\n"
+                    "             conditions on a target model's hidden states and emits a\n"
+                    "             block of tokens. There is nothing here for it to draft\n"
+                    "             against, and the C20 loader is not implemented.\n");
+        std::printf("             Measured layouts: docs/10-dflash-draft-models.md\n"
+                    "             Owning worksheet: ai-coder/c20-speculation.md\n");
+        return 3;
+      }
+    }
 
     auto t_open0 = std::chrono::steady_clock::now();
     std::unique_ptr<Model> m;
@@ -284,10 +431,6 @@ int main(int argc, char** argv) {
     std::printf("prompt     : %zu tokens, round-trip \"%s\"\n", prompt.size(),
                 tok.decode(prompt).c_str());
 
-    if ((int)prompt.size() >= a.n_ctx) {
-      throw std::runtime_error("prompt longer than the context");
-    }
-
     // One report path for every exit, so a profiled run can never end without
     // its table. `finish` is defined here because it needs the loaded model.
     auto finish = [&]() {
@@ -311,6 +454,19 @@ int main(int argc, char** argv) {
       p.report(stdout);
       p.write_dir();
     };
+
+    // Tokenization is a complete result: ids printed, report emitted, exit 0
+    // BEFORE the context check and before prefill. The context bound and the
+    // forward pass belong to generation; a tokenizer cross-check must not pay
+    // for either (and must not fail on them).
+    if (a.tokenize_only) {
+      finish();
+      return 0;
+    }
+
+    if ((int)prompt.size() >= a.n_ctx) {
+      throw std::runtime_error("prompt longer than the context");
+    }
 
     if (a.bench) {
       run_bench(*m, a);

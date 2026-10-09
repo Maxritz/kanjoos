@@ -5,6 +5,13 @@ build. Phase 0 is almost entirely measurement, because the plan's two largest
 performance questions — does gfx1201 get a WMMA path, and is RDNA2's int dot
 real — are open, and both of them change what later phases should be built.
 
+> **Target order — `gfx1201` is the primary card (2026-10-08).** Every phase is
+> built, measured and gated on gfx1201 / Windows 11 first. `gfx1031` is **future
+> work**: a declared target that is still compiled and censused, but never the
+> default, never the first thing measured, and never a gate on current results.
+> Phase 0's RDNA2 answer (P0-3) stays valid as a measurement; it does not make
+> RDNA2 the ordering constraint.
+
 ---
 
 ## Phase 0 — Measure before building (gate for everything)

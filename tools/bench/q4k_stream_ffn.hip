@@ -88,6 +88,7 @@
 
 #include "src/platform/memprobe.h"
 #include "src/residency/residency.h"
+#include "src/profiler/profiler.h"
 
 #define HIPCHECK(x)                                                            \
     do {                                                                       \
@@ -517,11 +518,14 @@ class HipTransfer final : public knj::TransferEngine {
                                knj::IoClass io) override {
         (void)io;
         const knj::TransferId id = next_++;
-        X x; x.kind = H2D;
+        X x; x.kind = D2H;   // it is a device-to-host copy; only `poll` reads
+                             // the kind, and it reads it to tell NVMe apart.
         HIPCHECK(hipEventCreateWithFlags(&x.ev, hipEventDisableTiming));
         HIPCHECK(hipMemcpyAsync(dst_host, src_device, bytes, hipMemcpyDeviceToHost, xstream()));
         HIPCHECK(hipEventRecord(x.ev, xstream()));
         xfer_[id] = x;
+        d2h_bytes_ += bytes;
+        ++d2h_submits_;
         return id;
     }
     knj::TransferId submit_nvme_write(const void *, uint64_t, uint64_t, knj::IoClass) override {
@@ -549,6 +553,8 @@ class HipTransfer final : public knj::TransferEngine {
     uint64_t nvme_submits() const { return nvme_submits_; }
     uint64_t h2d_submits() const { return h2d_submits_; }
     uint64_t h2d_bytes() const { return h2d_bytes_; }
+    uint64_t d2h_submits() const { return d2h_submits_; }
+    uint64_t d2h_bytes() const { return d2h_bytes_; }
     uint64_t h2d_ns() const { return h2d_ns_; }
     uint64_t nvme_busy_ns() const { return nvme_.busy_ns(); }
     uint64_t nvme_reads() const { return nvme_.reads(); }
@@ -574,6 +580,7 @@ class HipTransfer final : public knj::TransferEngine {
     std::unordered_map<knj::TransferId, X> xfer_;
     knj::TransferId next_ = 1;
     uint64_t nvme_submits_ = 0, h2d_submits_ = 0, h2d_bytes_ = 0, writes_refused_ = 0;
+    uint64_t d2h_submits_ = 0, d2h_bytes_ = 0;
     mutable uint64_t h2d_ns_ = 0;
 };
 
@@ -607,6 +614,8 @@ class PinnedArena final : public knj::HostArena {
         if (!ok) return nullptr;
         live_[p] = bytes;
         ++allocs_;
+        live_bytes_ += bytes;
+        note_peak_pinned();
         return p;
     }
     void free(void *p) override {
@@ -615,7 +624,8 @@ class PinnedArena final : public knj::HostArena {
         if (it == live_.end()) return;
         const uint64_t b = it->second;
         live_.erase(it);
-        if (reuse_) { pool_.insert({b, p}); return; }
+        live_bytes_ -= b;
+        if (reuse_) { pool_.insert({b, p}); pooled_bytes_ += b; return; }
         const uint64_t t0 = mono_ns();
         hipHostFree(p);
         host_free_ns_ += mono_ns() - t0;      // trap: cost of unpinning pages
@@ -630,6 +640,7 @@ class PinnedArena final : public knj::HostArena {
             ++frees_;
         }
         pool_.clear();
+        pooled_bytes_ = 0;
     }
     std::size_t live() const { return live_.size(); }
     std::size_t cached() const { return pool_.size(); }
@@ -643,9 +654,19 @@ class PinnedArena final : public knj::HostArena {
     uint64_t reuse_hits() const { return reuse_hits_; }
     uint64_t host_alloc_ns() const { return host_alloc_ns_; }
     uint64_t host_free_ns() const { return host_free_ns_; }
+    // Peak pinned bytes = the high-water mark of (in use by an expert's staging
+    // copy) + (retained in the reuse pool). A pooled page is still PINNED, so
+    // counting only the live map would understate what the process holds from the
+    // OS, which is the number C21's transfer footer exists to report.
+    uint64_t peak_pinned_bytes() const { return peak_pinned_bytes_; }
 
  private:
     bool reuse_ = false;
+    void note_peak_pinned() {
+        const uint64_t s = live_bytes_ + pooled_bytes_;
+        if (s > peak_pinned_bytes_) peak_pinned_bytes_ = s;
+    }
+    uint64_t live_bytes_ = 0, pooled_bytes_ = 0, peak_pinned_bytes_ = 0;
     std::unordered_map<void *, uint64_t> live_;
     std::multimap<uint64_t, void *> pool_;   // size -> buffer
     uint64_t allocs_ = 0, frees_ = 0, reuse_hits_ = 0;
@@ -1043,6 +1064,24 @@ static void host_project(const std::string &model, long long base, long long sla
 }
 
 int main(int argc, char **argv) {
+    // C21: the profile table is ON by default in this driver. The residency and
+    // transfer footers are part of what it reports, and a driver whose whole
+    // subject is the streamed pipeline is exactly where a device clock matters:
+    // the host interval for a layer says nothing about when the device was busy.
+    // KNJ_PROFILE=0 turns it off. (`--profiling` is the CLI's flag, not this one.)
+    {
+        const char *pe = getenv("KNJ_PROFILE");
+        knj::ProfileConfig p21;
+        p21.on = !(pe != nullptr && pe[0] == '0');
+        p21.format = "table";
+        p21.detail = "class";
+        p21.floor_ops = 256;
+        p21.warmup_steps = 0;   // this driver runs passes, not warm-up steps
+        p21.subtract_floor = true;
+        knj::Profiler &pr = knj::Profiler::get();
+        pr.configure(p21);
+        pr.measure_floor();
+    }
     if (argc < 3) {
         std::fprintf(stderr,
                      "usage: %s <job_all> <dumpdir> [tokens] [slots] [pf_slots] [max_layers]\n",
@@ -1955,6 +1994,83 @@ int main(int argc, char **argv) {
         // lookahead would let a later item consume the slot the current item
         // needs (C9 grants slots in hash order, not in step order), and the
         // step then deadlocks behind slots whose kernels have not launched.
+        // ---- C21: the device lane -------------------------------------------
+        // One timing-enabled event pair per layer, recorded on the COMPUTE stream:
+        // the begin right after the layer's uploads are enqueued, the end when the
+        // next layer is entered. Recorded only. There is no synchronise inside the
+        // step loop (AGENTS.md rule 12); the offsets are read exactly once, after
+        // the pass, where the queue is drained anyway.
+        //
+        // What a pair measures, stated precisely rather than flatteringly: the
+        // device-timeline window that layer L's work occupies IN STREAM ORDER. A
+        // gap between two windows is device idle in the only sense this driver can
+        // establish -- the queue was empty -- and C21 publishes that gap as
+        // `idle us` on the `device-layer` row. Nothing here samples execution-unit
+        // occupancy, so a window that contains a queue-empty stall is not pushed
+        // into `idle`. That asymmetry is the honest one: idle is claimed only
+        // where it is proven.
+        struct DevLane {
+            hipEvent_t epoch = nullptr;
+            std::vector<hipEvent_t> ev;      // 2 events per layer: begin, end
+            std::vector<uint8_t> state;      // 0 none, 1 opened, 2 closed
+            int opened = 0, closed = 0, dropped = 0;
+            bool ok = false;
+            void init(int layers, hipStream_t st) {
+                if (layers <= 0) return;
+                if (hipEventCreate(&epoch) != hipSuccess) return;
+                ev.resize((size_t)layers * 2, nullptr);
+                for (size_t i = 0; i < ev.size(); ++i) {
+                    if (hipEventCreate(&ev[i]) != hipSuccess) return;
+                }
+                state.assign((size_t)layers, 0);
+                HIPCHECK(hipEventRecord(epoch, st));   // the one common time base
+                ok = true;
+            }
+            void open(int L, hipStream_t st) {
+                if (!ok || L < 0 || L >= (int)state.size() || state[(size_t)L] != 0) return;
+                if (hipEventRecord(ev[(size_t)L * 2], st) != hipSuccess) { ++dropped; return; }
+                state[(size_t)L] = 1;
+                ++opened;
+            }
+            void close(int L, hipStream_t st) {
+                if (!ok || L < 0 || L >= (int)state.size() || state[(size_t)L] != 1) return;
+                if (hipEventRecord(ev[(size_t)L * 2 + 1], st) != hipSuccess) { ++dropped; return; }
+                state[(size_t)L] = 2;
+                ++closed;
+            }
+            void destroy() {
+                for (hipEvent_t e : ev) if (e) (void)hipEventDestroy(e);
+                if (epoch) (void)hipEventDestroy(epoch);
+                ev.clear();
+                state.clear();
+                epoch = nullptr;
+                ok = false;
+            }
+        } dev;
+        // C21 state is (re)claimed at the START of the pass, not at the end.
+        // Resetting the profiler at the end wipes the pass's own host markers
+        // before the table is printed -- the first version of this block did
+        // exactly that, and its table showed one device row beside zero host rows.
+        // The clock domain is claimed here too: host markers must know, from the
+        // first one, that they do not own the `dev` column.
+        if (knj::Profiler::get().on()) {
+            knj::Profiler::get().reset();
+            knj::Profiler::get().enable_device_backend();
+            dev.init(nlr, compute);
+        }
+
+        // Residency is derived from the manager's OWN EVENT STREAM, not polled.
+        //
+        // The first version of this block walked the whole registry with
+        // locate() at every layer boundary. That looked free and was not: the
+        // NVMe reader runs on a worker thread, and the extra host work let reads
+        // land before their demand, so a deadline-0 wait pass that must report
+        // 336 misses reported 0. A/B against KNJ_PROFILE=0 is what found it.
+        // Instrumentation that changes the measurement is not instrumentation,
+        // which is why these four numbers come from counters the pass already
+        // keeps: nothing here asks the manager a new question.
+        const uint64_t res_objects = (uint64_t)nlr * (uint64_t)NE * 3u;
+
         auto issue_demand = [&](const Work &w, bool lookahead) {
             const knj::ExpertId id = obj_of(w);
             const bool was_ready = m.demand(id, lookahead ? knj::KVTier::RAM : knj::KVTier::VRAM);
@@ -1979,19 +2095,28 @@ int main(int argc, char **argv) {
         };
         auto enter_layer = [&](int L) {
             if (L == curLayer) return;
-            if (curLayer >= 0)
+            if (curLayer >= 0) {
                 ss.layer_ms[(size_t)curLayer] += (float)((double)(mono_ns() - layerT0) / 1e6);
+                dev.close(curLayer, compute);   // C21: layer L's device window ends here
+            }
             curLayer = L;
             layerT0 = mono_ns();
             m.begin_layer((uint32_t)L);
-            HIPCHECK(hipMemcpy(dIdx, ppl[(size_t)L].pairIdx.data(),
-                               ppl[(size_t)L].pairIdx.size() * sizeof(int), hipMemcpyHostToDevice));
-            HIPCHECK(hipMemcpy(dCnt, ppl[(size_t)L].pairCnt.data(),
-                               ppl[(size_t)L].pairCnt.size() * sizeof(int), hipMemcpyHostToDevice));
-            HIPCHECK(hipMemcpy(dTok, ppl[(size_t)L].pairTok.data(),
-                               ppl[(size_t)L].pairTok.size() * sizeof(int), hipMemcpyHostToDevice));
-            HIPCHECK(hipMemcpy(dX, xin[(size_t)L].data(), xin[(size_t)L].size() * sizeof(__half),
-                               hipMemcpyHostToDevice));
+            {
+                // Host time only: hipMemcpy is blocking, so this scope is the host
+                // cost of getting the layer's route and inputs onto the device, and
+                // the device lane does not start until it is done.
+                KNJ_PROFILE_OP("layer-upload");
+                HIPCHECK(hipMemcpy(dIdx, ppl[(size_t)L].pairIdx.data(),
+                                   ppl[(size_t)L].pairIdx.size() * sizeof(int), hipMemcpyHostToDevice));
+                HIPCHECK(hipMemcpy(dCnt, ppl[(size_t)L].pairCnt.data(),
+                                   ppl[(size_t)L].pairCnt.size() * sizeof(int), hipMemcpyHostToDevice));
+                HIPCHECK(hipMemcpy(dTok, ppl[(size_t)L].pairTok.data(),
+                                   ppl[(size_t)L].pairTok.size() * sizeof(int), hipMemcpyHostToDevice));
+                HIPCHECK(hipMemcpy(dX, xin[(size_t)L].data(), xin[(size_t)L].size() * sizeof(__half),
+                                   hipMemcpyHostToDevice));
+            }
+            dev.open(L, compute);   // C21: the layer's device window opens after its uploads
             // C10 boundary prefetch. True-set passes prefetch layer L+horizon's
             // routed objects -- an oracle predictor, which isolates the pipeline
             // mechanism from predictor accuracy. The carry-forward pass instead
@@ -2025,6 +2150,9 @@ int main(int argc, char **argv) {
             for (int i = 0; i < NIT && i < depth; ++i) issue_demand(list[(size_t)i], true);
         for (int i = 0; i < NIT; ++i) {
             const Work &w = list[(size_t)i];
+            // Host time for one routed item: the scheduler calls, the wait, the
+            // launch. Device time for the same item is in the lanes C21 folds below.
+            KNJ_PROFILE_OP("stream-item");
             enter_layer(w.L);
             if (pc.mode >= 2) {
                 const int look = i + depth;
@@ -2317,6 +2445,142 @@ int main(int argc, char **argv) {
             std::sort(w.begin(), w.end());
             ss.p50 = w[w.size() / 2];
             ss.p90 = w[(w.size() * 9) / 10];
+        }
+
+        // =====================================================================
+        // C21: this pass's profile table, on the DEVICE clock.
+        //
+        // Built here rather than in report() because the event pairs recorded
+        // above become offsets only once the stream is drained, and a synchronise
+        // inside the step loop is forbidden (AGENTS.md rule 12). One drain, after
+        // the loop, is what makes `dev` a real device measurement instead of the
+        // host interval wearing its name.
+        //
+        // `dev` is device event time and `host` is marker time: two clocks, two
+        // columns, and the report states which one it measured and what its
+        // resolution is.
+        // =====================================================================
+        {
+            knj::Profiler &prof = knj::Profiler::get();
+            if (prof.on()) {
+                if (dev.ok) {
+                    HIPCHECK(hipStreamSynchronize(compute));
+                    for (int L = 0; L < (int)dev.state.size(); ++L) {
+                        if (dev.state[(size_t)L] != 2) continue;
+                        float a = 0.0f, b = 0.0f;
+                        if (hipEventElapsedTime(&a, dev.epoch, dev.ev[(size_t)L * 2]) != hipSuccess)
+                            continue;
+                        if (hipEventElapsedTime(&b, dev.epoch, dev.ev[(size_t)L * 2 + 1]) != hipSuccess)
+                            continue;
+                        prof.device_span("device-layer", (uint64_t)((double)a * 1e6),
+                                         (uint64_t)((double)b * 1e6), 0);
+                    }
+                    // The device floor, measured through the identical
+                    // record-then-read path on empty pairs. Its honest meaning is
+                    // the RESOLUTION of the measurement -- an event record costs
+                    // host time, not device time, and elapsed time is reported in
+                    // float milliseconds -- so it is published rather than
+                    // silently subtracted from numbers that never contained it.
+                    hipEvent_t f0 = nullptr, f1 = nullptr;
+                    if (hipEventCreate(&f0) == hipSuccess && hipEventCreate(&f1) == hipSuccess) {
+                        uint64_t tot = 0, mn = ~(uint64_t)0;
+                        int got = 0, rejected = 0;
+                        for (int i = 0; i < 64; ++i) {
+                            if (hipEventRecord(f0, compute) != hipSuccess) break;
+                            if (hipEventRecord(f1, compute) != hipSuccess) break;
+                            if (hipStreamSynchronize(compute) != hipSuccess) break;
+                            float ms = 0.0f;
+                            if (hipEventElapsedTime(&ms, f0, f1) != hipSuccess) break;
+                            const uint64_t ns = (uint64_t)((double)ms * 1e6);
+                            // An empty pair that reports more than a millisecond is
+                            // not a floor measurement, it is the timer's first call
+                            // on a cold context. Rejecting it is stated, not silent:
+                            // one such sample turned the printed mean into 2.9e17 ns.
+                            if (ns > 1000000ull) { ++rejected; continue; }
+                            tot += ns;
+                            if (ns < mn) mn = ns;
+                            ++got;
+                        }
+                        if (got > 0) {
+                            // MIN, not mean. The overhead is additive and cannot be
+                            // negative, so the tightest lower bound over many trials
+                            // is the best estimate of the fixed cost; the mean of
+                            // ISOLATED pairs also carries each pair's own submission
+                            // overhead, which the layer pairs -- recorded into one
+                            // already-batched queue -- never pay.
+                            prof.set_device_floor(mn, 64);
+                            printf("  C21 device floor: min %llu ns, mean %llu ns over %d "
+                                   "empty event pair(s), measured isolated (%d rejected as "
+                                   ">1 ms)\n",
+                                   (unsigned long long)mn,
+                                   (unsigned long long)(tot / (uint64_t)got), got, rejected);
+                        }
+                        if (f0) (void)hipEventDestroy(f0);
+                        if (f1) (void)hipEventDestroy(f1);
+                    }
+                    prof.set_device_dropped((uint64_t)dev.dropped);
+                }
+                // C8/C9/C11 footers, from THIS pass's counters: the residency
+                // and transfer lines in the table stop being `NOT MEASURED`
+                // because these are the numbers the driver already gates on.
+                knj::ResidencyStats rs;
+                {
+                    // Each read stages its object in RAM; each into_vram is a
+                    // promotion to a slot. An object neither read nor promoted
+                    // never left the file, which is what the third share means.
+                    const double tot = (double)res_objects;
+                    const double read = (double)std::min((uint64_t)xfer.nvme_reads(), res_objects);
+                    const double vram = (double)std::min((uint64_t)tel.into_vram(), res_objects);
+                    rs.measured = res_objects > 0;
+                    rs.vram_pct = 100.0 * vram / tot;
+                    rs.ram_pct = 100.0 * (read > vram ? read - vram : 0.0) / tot;
+                    rs.nvme_pct = 100.0 * (tot - read > 0.0 ? tot - read : 0.0) / tot;
+                }
+                rs.slots_used = (uint64_t)pc.sl->peak_in_use();
+                rs.slots_total = (uint64_t)pc.sl->n_slots();
+                rs.evictions = tel.cause("evict");
+                // The demand hit rate, which is the figure this driver gates on
+                // (`prefetch hit rate at demand`). The C21 event causes
+                // prefetch_landed/prefetch_miss are both zero for a pass that never
+                // prefetches, and a 0/0 rendered as 0.00 would be a false zero
+                // where the real measurement is "nothing was prefetched".
+                rs.prefetch_hit = ss.demand_total > 0
+                    ? (double)ss.demand_hits / (double)ss.demand_total : 0.0;
+                rs.stall_ms = (double)wait_ns_total / 1e6;
+                prof.note_residency(rs);
+
+                knj::TransferStats ts;
+                ts.measured = true;
+                ts.h2d_bytes = xfer.h2d_bytes();
+                ts.d2h_bytes = xfer.d2h_bytes();
+                ts.nvme_read_bytes = xfer.nvme_bytes();
+                ts.nvme_write_bytes = 0;   // every NVMe write on this path is refused
+                ts.peak_pinned_bytes = arena.peak_pinned_bytes();
+                prof.note_transfer(ts);
+
+                char devline[320];
+                std::snprintf(devline, sizeof(devline),
+                              "streamed expert FFN, headless (no transformer) -- device clock from "
+                              "%d compute-stream event pair(s), pass %s, mode %d",
+                              dev.closed, pc.name, pc.mode);
+                char budget[512];
+                const knj::HostMem hm2 = knj::host_mem();
+                std::snprintf(budget, sizeof(budget),
+                              "vram peak (device-wide) %.0f MiB   ram avail %.2f/%.2f GiB   "
+                              "slots %d x %.2f MiB   objects %llu"
+                              "   (residency = share of the registry that reached VRAM / staged "
+                              "in RAM / never left the file, derived from the manager's event "
+                              "stream and not polled; d2h is counted only through the C11 path, "
+                              "so a direct hipMemcpy D2H is timed but not byte-counted)",
+                              (double)run_vram_peak_used / 1048576.0,
+                              (double)hm2.phys_avail_bytes / 1073741824.0,
+                              (double)hm2.phys_total_bytes / 1073741824.0,
+                              pc.sl->n_slots(), (double)pc.sl->slot_bytes() / 1048576.0,
+                              (unsigned long long)res_objects);
+                prof.print_header(stdout, "0.1.0", devline, budget);
+                prof.report_table(stdout);
+            }
+            dev.destroy();
         }
     };
 

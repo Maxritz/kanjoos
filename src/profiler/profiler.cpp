@@ -64,6 +64,9 @@ void Profiler::reset() {
   stack_.clear();
   idle_pending_ = 0;
   for (int i = 0; i < 8; ++i) stream_end_ns_[i] = 0;
+  for (int i = 0; i < 8; ++i) dev_pending_[i].clear();
+  dev_spans_recorded_ = dev_spans_dropped_ = 0;
+  dev_need_fold_ = false;
   steps_seen_ = steps_kept_ = steps_discarded_ = 0;
   nested_ops_ = max_depth_ = total_ops_ = 0;
 }
@@ -125,10 +128,88 @@ void Profiler::end() {
   if (steps_seen_ < (uint64_t)cfg_.warmup_steps) return;   // warmup: discarded
   Row* r = find_or_add(f.group);
   r->ops += 1;
-  r->dev_ns += self;
+  // With a device backend attached, `dev` belongs to the device events and a
+  // host marker has no business writing it -- that is the difference between a
+  // declared clock domain and a claimed one.
+  if (!device_backend_) {
+    r->dev_ns += self;
+    if (outer) r->idle_ns += idle_pending_;
+  }
   r->host_ns += self;
-  if (outer) r->idle_ns += idle_pending_;
   ++total_ops_;
+}
+
+void Profiler::device_span(const char* name, uint64_t start_ns, uint64_t end_ns, int stream) {
+  if (!cfg_.on || !device_backend_) return;
+  if (stream < 0 || stream >= 8) stream = 0;
+  if (end_ns < start_ns) end_ns = start_ns;
+  DeviceSpan sp;
+  sp.group = group_for(name ? name : "");
+  sp.start = start_ns;
+  sp.end = end_ns;
+  dev_pending_[stream].push_back(sp);
+  find_or_add(sp.group)->dev_spans += 1;
+  ++dev_spans_recorded_;
+  dev_need_fold_ = true;
+}
+
+// The interval walk. Spans arrive per stream and are folded in ascending start
+// order, so containment IS the nesting: a span that starts after its parent and
+// ends before it is a child, and its microseconds are subtracted from the
+// parent's self time exactly as the host marker stack does.
+//
+// Idle is the gap between OUTERMOST spans on one stream. A gap while a parent is
+// still open is not idle -- the compiler is inside a scope the report already
+// attributes -- and counting it would invent device idle time that the run never
+// had.
+//
+// `mutable` state and a const method on purpose: the report writers fold on
+// demand, so a caller that forgets a finalise step cannot silently lose the last
+// span of every stream.
+void Profiler::fold_device_spans() const {
+  if (!dev_need_fold_) return;
+  dev_need_fold_ = false;
+  Profiler* self = const_cast<Profiler*>(this);
+  for (int st = 0; st < 8; ++st) {
+    std::vector<DeviceSpan>& v = dev_pending_[st];
+    if (v.empty()) continue;
+    std::stable_sort(v.begin(), v.end(),
+                     [](const DeviceSpan& a, const DeviceSpan& b) { return a.start < b.start; });
+    struct Open {
+      std::string group;
+      uint64_t start = 0, end = 0, child = 0;
+    };
+    std::vector<Open> open;
+    uint64_t prev_end = 0;
+    auto close = [&](const Open& f) {
+      const uint64_t dur = f.end - f.start;
+      Row* r = self->find_or_add(f.group);
+      r->dev_ns += dur > f.child ? dur - f.child : 0;
+    };
+    for (const DeviceSpan& s : v) {
+      while (!open.empty() && s.start >= open.back().end) {
+        close(open.back());
+        open.pop_back();
+      }
+      if (open.empty() && prev_end != 0 && s.start > prev_end) {
+        Row* r = self->find_or_add(s.group);
+        r->idle_ns += s.start - prev_end;
+      }
+      const uint64_t dur = s.end - s.start;
+      if (!open.empty()) open.back().child += dur;
+      Open o;
+      o.group = s.group;
+      o.start = s.start;
+      o.end = s.end;
+      open.push_back(o);
+      if (s.end > prev_end) prev_end = s.end;
+    }
+    while (!open.empty()) {
+      close(open.back());
+      open.pop_back();
+    }
+    v.clear();
+  }
 }
 
 void Profiler::step_done() {
@@ -192,14 +273,43 @@ std::vector<Profiler::Row> Profiler::rows_sorted() const {
 // A row that did nothing still costs the marker pair. Subtracting the floor is
 // what makes a sub-microsecond row readable; --profiling=no-subtract keeps the
 // raw numbers instead, and the report says so.
-double Profiler::subtract(const Row& r) const {
-  if (!cfg_.subtract_floor || floor_dev_ns_ == 0 || r.ops == 0) return 0.0;
-  return (double)floor_dev_ns_ * (double)r.ops;
+//
+// There are two floors because there are two clocks. On the host path they are
+// one number (one marker pair, one clock). With a device backend the device
+// floor has to be measured through the event path, and until it is, the dev
+// rows are printed RAW -- subtracting a host floor from device time would be an
+// arithmetic error dressed as a correction.
+double Profiler::subtract_host(const Row& r) const {
+  if (!cfg_.subtract_floor || floor_host_ns_ == 0 || r.ops == 0) return 0.0;
+  const double total = (double)floor_host_ns_ * (double)r.ops;
+  // Never subtract more than the row contains. Without this a row whose own time
+  // is below its floor renders as NEGATIVE microseconds, which is not a small
+  // number -- it is a nonsense one, and it reads as a bug in the engine rather
+  // than as the resolution limit of the instrument.
+  return total > (double)r.host_ns ? (double)r.host_ns : total;
+}
+
+double Profiler::subtract_dev(const Row& r) const {
+  if (!cfg_.subtract_floor) return 0.0;
+  if (device_backend_) {
+    if (!device_floor_measured_) return 0.0;
+    // The multiplier is the number of MEASUREMENTS in the row. For a row built
+    // from host markers that is `ops`; a device-only row has ops 0 and its
+    // measurement count is its span count. Using ops alone would skip the floor
+    // for exactly the rows that came from the device clock.
+    const uint64_t n = r.ops > 0 ? r.ops : r.dev_spans;
+    if (n == 0) return 0.0;
+    const double total = (double)dev_floor_ns_ * (double)n;
+    return total > (double)r.dev_ns ? (double)r.dev_ns : total;
+  }
+  if (floor_dev_ns_ == 0 || r.ops == 0) return 0.0;
+  const double total = (double)floor_dev_ns_ * (double)r.ops;
+  return total > (double)r.dev_ns ? (double)r.dev_ns : total;
 }
 
 std::string Profiler::identity_line() const {
   const HostMem hm = host_mem();
-  char buf[512];
+  char buf[640];
   std::snprintf(buf, sizeof(buf),
                 "clock %s   dev/host are SELF time (child time subtracted; max depth %llu)"
                 "   steps kept %llu, discarded %llu (warmup %d)   ops %llu   rss %.0f MiB",
@@ -229,21 +339,22 @@ void Profiler::report_table(std::FILE* f) const {
     std::fprintf(f, "\n-- profile: off (no --profiling flag) --\n");
     return;
   }
+  fold_device_spans();
   std::fprintf(f, "\n     %-20s %5s %7s %12s %12s %12s\n", "component", "ops", "%dev",
                "dev us", "idle us", "host us");
   const std::vector<Row> v = rows_sorted();
   uint64_t total_dev = 0, total_idle = 0, total_host = 0;
   for (const Row& r : v) {
-    const double sub = subtract(r);
-    total_dev += r.dev_ns > (uint64_t)sub ? r.dev_ns - (uint64_t)sub : 0;
+    const double sd = subtract_dev(r), sh = subtract_host(r);
+    total_dev += r.dev_ns > (uint64_t)sd ? r.dev_ns - (uint64_t)sd : 0;
     total_idle += r.idle_ns;
-    total_host += r.host_ns > (uint64_t)sub ? r.host_ns - (uint64_t)sub : 0;
+    total_host += r.host_ns > (uint64_t)sh ? r.host_ns - (uint64_t)sh : 0;
   }
   for (const Row& r : v) {
-    const double sub = subtract(r);
-    const double dev = ((double)r.dev_ns - sub) / 1e3;
-    const double host = ((double)r.host_ns - sub) / 1e3;
-    const double pct = total_dev > 0 ? 100.0 * ((double)r.dev_ns - sub) / (double)total_dev : 0.0;
+    const double sd = subtract_dev(r), sh = subtract_host(r);
+    const double dev = ((double)r.dev_ns - sd) / 1e3;
+    const double host = ((double)r.host_ns - sh) / 1e3;
+    const double pct = total_dev > 0 ? 100.0 * ((double)r.dev_ns - sd) / (double)total_dev : 0.0;
     std::fprintf(f, "     %-20s %5llu %6.1f%% %12.2f %12.2f %12.2f\n", r.group.c_str(),
                  (unsigned long long)r.ops, pct, dev, (double)r.idle_ns / 1e3, host);
   }
@@ -266,6 +377,23 @@ void Profiler::report_table(std::FILE* f) const {
                    ? "  (no device event backend on this path: dev and host are the same "
                      "interval by construction)"
                    : "");
+  if (device_backend_) {
+    std::fprintf(f,
+                 "   device events: %llu span(s) folded into `dev`/%llu dropped "
+                 "(ring full)%s\n",
+                 (unsigned long long)dev_spans_recorded_,
+                 (unsigned long long)dev_spans_dropped_,
+                 dev_spans_dropped_ ? "  <-- a stated loss, not a silent one" : "");
+    if (device_floor_measured_)
+      std::fprintf(f, "   device floor: %d empty event pair(s), %.3f us each -- dev rows "
+                      "above are floor-subtracted\n",
+                   dev_floor_n_, (double)dev_floor_ns_ / 1e3);
+    else
+      std::fprintf(f, "   device floor: NOT MEASURED -- the dev rows above are RAW; a host "
+                      "floor is deliberately not subtracted from device time\n");
+    std::fprintf(f, "   device resolution: elapsed-time is reported in float ms, so a span "
+                    "below roughly 0.1 us is inside the timer's noise\n");
+  }
   if (res_.measured) {
     std::fprintf(f,
                  "\n  residency   vram %.1f%%   ram %.1f%%   nvme %.1f%%   slots %llu/%llu   "
@@ -277,18 +405,22 @@ void Profiler::report_table(std::FILE* f) const {
     std::fprintf(f, "\n  residency   NOT MEASURED on this path\n");
   }
   if (xfer_.measured) {
+    // Peak pinned is printed in MiB, not GiB: it is a STAGING high-water mark and
+    // one expert-side bounce buffer is MiB-scale. In GiB a real 5 MiB peak renders
+    // as `0.00` -- a true measurement displayed as a false zero.
     std::fprintf(f,
                  "  transfer    h2d %.2f GB   d2h %.2f GB   nvme read %.2f GB   nvme write "
-                 "%.2f GB   peak pinned %.2f GiB\n",
+                 "%.2f GB   peak pinned %.2f MiB\n",
                  (double)xfer_.h2d_bytes / 1e9, (double)xfer_.d2h_bytes / 1e9,
                  (double)xfer_.nvme_read_bytes / 1e9, (double)xfer_.nvme_write_bytes / 1e9,
-                 (double)xfer_.peak_pinned_bytes / 1073741824.0);
+                 (double)xfer_.peak_pinned_bytes / 1048576.0);
   } else {
     std::fprintf(f, "  transfer    NOT MEASURED on this path\n");
   }
 }
 
 void Profiler::report_json(std::FILE* f) const {
+  fold_device_spans();
   const std::vector<Row> v = rows_sorted();
   std::fprintf(f, "{\n");
   std::fprintf(f, "  \"clock_domain\": \"%s\",\n", clock_domain_name(domain_));
@@ -302,26 +434,52 @@ void Profiler::report_json(std::FILE* f) const {
   std::fprintf(f, "  \"ops\": %llu,\n", (unsigned long long)total_ops_);
   std::fprintf(f, "  \"floor\": {\"n\": %d, \"host_ns\": %llu, \"dev_ns\": %llu},\n", floor_n_,
                (unsigned long long)floor_host_ns_, (unsigned long long)floor_dev_ns_);
+  std::fprintf(f, "  \"device_backend\": %s,\n", device_backend_ ? "true" : "false");
+  std::fprintf(f, "  \"device_spans\": %llu,\n", (unsigned long long)dev_spans_recorded_);
+  std::fprintf(f, "  \"device_spans_dropped\": %llu,\n", (unsigned long long)dev_spans_dropped_);
+  std::fprintf(f, "  \"device_floor_measured\": %s,\n", device_floor_measured_ ? "true" : "false");
   std::fprintf(f, "  \"components\": [\n");
   for (size_t i = 0; i < v.size(); ++i) {
     const Row& r = v[i];
-    const double sub = subtract(r);
+    const double sd = subtract_dev(r), sh = subtract_host(r);
     std::fprintf(f,
                  "    {\"component\": \"%s\", \"ops\": %llu, \"dev_ns\": %llu, "
-                 "\"dev_ns_self\": %.1f, \"idle_ns\": %llu, \"host_ns\": %llu}%s\n",
+                 "\"dev_ns_self\": %.1f, \"idle_ns\": %llu, \"host_ns\": %llu, "
+                 "\"host_ns_self\": %.1f}%s\n",
                  json_escape(r.group).c_str(), (unsigned long long)r.ops,
                  (unsigned long long)r.dev_ns,
-                 (double)r.dev_ns - sub > 0.0 ? (double)r.dev_ns - sub : 0.0,
+                 (double)r.dev_ns - sd > 0.0 ? (double)r.dev_ns - sd : 0.0,
                  (unsigned long long)r.idle_ns, (unsigned long long)r.host_ns,
+                 (double)r.host_ns - sh > 0.0 ? (double)r.host_ns - sh : 0.0,
                  i + 1 < v.size() ? "," : "");
   }
   std::fprintf(f, "  ],\n");
   std::fprintf(f, "  \"residency_measured\": %s,\n", res_.measured ? "true" : "false");
-  std::fprintf(f, "  \"transfer_measured\": %s\n", xfer_.measured ? "true" : "false");
+  if (res_.measured) {
+    std::fprintf(f, "  \"residency\": {\"vram_pct\": %.4f, \"ram_pct\": %.4f, "
+                    "\"nvme_pct\": %.4f, \"slots_used\": %llu, \"slots_total\": %llu, "
+                    "\"evictions\": %llu, \"prefetch_hit\": %.4f, \"stall_ms\": %.4f},\n",
+                 res_.vram_pct, res_.ram_pct, res_.nvme_pct,
+                 (unsigned long long)res_.slots_used, (unsigned long long)res_.slots_total,
+                 (unsigned long long)res_.evictions, res_.prefetch_hit, res_.stall_ms);
+  }
+  std::fprintf(f, "  \"transfer_measured\": %s", xfer_.measured ? "true" : "false");
+  if (xfer_.measured) {
+    std::fprintf(f, ",\n  \"transfer\": {\"h2d_bytes\": %llu, \"d2h_bytes\": %llu, "
+                    "\"nvme_read_bytes\": %llu, \"nvme_write_bytes\": %llu, "
+                    "\"peak_pinned_bytes\": %llu}\n",
+                 (unsigned long long)xfer_.h2d_bytes, (unsigned long long)xfer_.d2h_bytes,
+                 (unsigned long long)xfer_.nvme_read_bytes,
+                 (unsigned long long)xfer_.nvme_write_bytes,
+                 (unsigned long long)xfer_.peak_pinned_bytes);
+  } else {
+    std::fprintf(f, "\n");
+  }
   std::fprintf(f, "}\n");
 }
 
 void Profiler::report_csv(std::FILE* f) const {
+  fold_device_spans();
   std::fprintf(f, "component,ops,dev_ns,idle_ns,host_ns,clock_domain,detail,floor_dev_ns\n");
   const std::vector<Row> v = rows_sorted();
   for (const Row& r : v)

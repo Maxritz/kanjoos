@@ -396,48 +396,66 @@ void Model::matmul_expert(const TensorInfo& w, int e, const float* x, int m, int
   matmul(sub, x, m, ldx, y, ldy);
 }
 
-void Model::moe(const Layer& w, const float* hx, int m, float* out) {
+void Model::moe(const Layer& w, const float* hx, int m, float* out, int layer) {
   const int H = g_.n_embd, E = g_.n_expert, K = g_.n_expert_used, F = g_.n_ff_exp;
+
+  // C21: the expert branch is the dominant component (57% of device time on the
+  // reference model, docs/CODING-LOG.PENDING.md Phase 42), and a single `moe` row
+  // says nothing about WHERE it goes. Each stage below carries its own scope, so
+  // `--profiling` attributes the branch instead of restating that it is
+  // expensive. `:layer` names them `moe-gate:12` for --profile-detail=layer; at
+  // the default =class detail the suffix is stripped and the rows read
+  // `moe-router`, `moe-gate`, `moe-up`, `moe-act`, `moe-down`, `moe-gather`,
+  // `moe-scatter` beside a much smaller `moe` (loop and fill overhead).
+  //
+  // Scope names deliberately do NOT use a bare `router`/`gate`: those would
+  // collide with nothing today but would read as top-level components rather
+  // than as parts of `moe`.
+  char nm[48];
 
   // Router. Softmax over every expert, then keep the top K and renormalise:
   // because softmax is monotonic, top-K of the probabilities is top-K of the
   // logits, and renormalising the kept weights is identical to softmaxing over
   // only the kept logits.
-  matmul(*w.gate_inp, hx, m, H, rlog_.data(), E);
-  for (auto& v : ex_tokens_) v.clear();
-  for (auto& v : ex_weight_) v.clear();
+  {
+    profile_name(nm, sizeof(nm), "moe-router", layer);
+    KNJ_PROFILE_OP(nm);
+    matmul(*w.gate_inp, hx, m, H, rlog_.data(), E);
+    for (auto& v : ex_tokens_) v.clear();
+    for (auto& v : ex_weight_) v.clear();
 
-  if ((size_t)E > probs_.size()) probs_.resize((size_t)E);
-  if ((size_t)K > chosen_.size()) chosen_.resize((size_t)K);
-  float* probs = probs_.data();
-  int* chosen = chosen_.data();
-  for (int t = 0; t < m; ++t) {
-    const float* lg = rlog_.data() + (size_t)t * E;
-    float mx = lg[0];
-    for (int e = 1; e < E; ++e) mx = std::max(mx, lg[e]);
-    float sum = 0.0f;
-    for (int e = 0; e < E; ++e) {
-      probs[e] = std::exp(lg[e] - mx);
-      sum += probs[e];
-    }
-    for (int e = 0; e < E; ++e) probs[e] /= sum;
-
-    for (int k = 0; k < K; ++k) {
-      int best = -1;
+    if ((size_t)E > probs_.size()) probs_.resize((size_t)E);
+    if ((size_t)K > chosen_.size()) chosen_.resize((size_t)K);
+    float* probs = probs_.data();
+    int* chosen = chosen_.data();
+    for (int t = 0; t < m; ++t) {
+      const float* lg = rlog_.data() + (size_t)t * E;
+      float mx = lg[0];
+      for (int e = 1; e < E; ++e) mx = std::max(mx, lg[e]);
+      float sum = 0.0f;
       for (int e = 0; e < E; ++e) {
-        bool taken = false;
-        for (int q = 0; q < k; ++q) taken = taken || chosen[q] == e;
-        if (taken) continue;
-        if (best < 0 || probs[e] > probs[best]) best = e;
+        probs[e] = std::exp(lg[e] - mx);
+        sum += probs[e];
       }
-      chosen[k] = best;
-    }
-    float keep = 0.0f;
-    for (int k = 0; k < K; ++k) keep += probs[chosen[k]];
-    const float inv = keep > 0.0f ? 1.0f / keep : 0.0f;
-    for (int k = 0; k < K; ++k) {
-      ex_tokens_[chosen[k]].push_back(t);
-      ex_weight_[chosen[k]].push_back(probs[chosen[k]] * inv);
+      for (int e = 0; e < E; ++e) probs[e] /= sum;
+
+      for (int k = 0; k < K; ++k) {
+        int best = -1;
+        for (int e = 0; e < E; ++e) {
+          bool taken = false;
+          for (int q = 0; q < k; ++q) taken = taken || chosen[q] == e;
+          if (taken) continue;
+          if (best < 0 || probs[e] > probs[best]) best = e;
+        }
+        chosen[k] = best;
+      }
+      float keep = 0.0f;
+      for (int k = 0; k < K; ++k) keep += probs[chosen[k]];
+      const float inv = keep > 0.0f ? 1.0f / keep : 0.0f;
+      for (int k = 0; k < K; ++k) {
+        ex_tokens_[chosen[k]].push_back(t);
+        ex_weight_[chosen[k]].push_back(probs[chosen[k]] * inv);
+      }
     }
   }
 
@@ -449,20 +467,44 @@ void Model::moe(const Layer& w, const float* hx, int m, float* out) {
     const std::vector<int32_t>& rows = ex_tokens_[e];
     // Gather the rows this expert actually sees, so one expert's weights are
     // read once for all of them -- the whole point of batching a sparse layer.
-    for (int r = 0; r < cnt; ++r) {
-      std::memcpy(gat_.data() + (size_t)r * H, hx + (size_t)rows[r] * H, sizeof(float) * H);
+    {
+      profile_name(nm, sizeof(nm), "moe-gather", layer);
+      KNJ_PROFILE_OP(nm);
+      for (int r = 0; r < cnt; ++r) {
+        std::memcpy(gat_.data() + (size_t)r * H, hx + (size_t)rows[r] * H, sizeof(float) * H);
+      }
     }
-    matmul_expert(*w.gate_exps, e, gat_.data(), cnt, H, y_gate_.data(), F);
-    matmul_expert(*w.up_exps, e, gat_.data(), cnt, H, y_up_.data(), F);
-    for (size_t i = 0, n = (size_t)cnt * F; i < n; ++i) {
-      y_gate_[i] = silu(y_gate_[i]) * y_up_[i];
+    {
+      profile_name(nm, sizeof(nm), "moe-gate", layer);
+      KNJ_PROFILE_OP(nm);
+      matmul_expert(*w.gate_exps, e, gat_.data(), cnt, H, y_gate_.data(), F);
     }
-    matmul_expert(*w.down_exps, e, y_gate_.data(), cnt, F, y_down_.data(), H);
-    for (int r = 0; r < cnt; ++r) {
-      const float wt = ex_weight_[e][r];
-      float* dst = out + (size_t)rows[r] * H;
-      const float* src = y_down_.data() + (size_t)r * H;
-      for (int i = 0; i < H; ++i) dst[i] += wt * src[i];
+    {
+      profile_name(nm, sizeof(nm), "moe-up", layer);
+      KNJ_PROFILE_OP(nm);
+      matmul_expert(*w.up_exps, e, gat_.data(), cnt, H, y_up_.data(), F);
+    }
+    {
+      profile_name(nm, sizeof(nm), "moe-act", layer);
+      KNJ_PROFILE_OP(nm);
+      for (size_t i = 0, n = (size_t)cnt * F; i < n; ++i) {
+        y_gate_[i] = silu(y_gate_[i]) * y_up_[i];
+      }
+    }
+    {
+      profile_name(nm, sizeof(nm), "moe-down", layer);
+      KNJ_PROFILE_OP(nm);
+      matmul_expert(*w.down_exps, e, y_gate_.data(), cnt, F, y_down_.data(), H);
+    }
+    {
+      profile_name(nm, sizeof(nm), "moe-scatter", layer);
+      KNJ_PROFILE_OP(nm);
+      for (int r = 0; r < cnt; ++r) {
+        const float wt = ex_weight_[e][r];
+        float* dst = out + (size_t)rows[r] * H;
+        const float* src = y_down_.data() + (size_t)r * H;
+        for (int i = 0; i < H; ++i) dst[i] += wt * src[i];
+      }
     }
   }
 }
@@ -598,7 +640,7 @@ const float* Model::forward(const int32_t* tokens, int n) {
     {
       profile_name(nm, sizeof(nm), "moe", il);
       KNJ_PROFILE_OP(nm);
-      moe(w, hx_.data(), n, ffn_out_.data());
+      moe(w, hx_.data(), n, ffn_out_.data(), il);
     }
     if (dbg && il == 0) {
       dump_f32("08_router_logits", rlog_.data(), (size_t)n * g_.n_expert);

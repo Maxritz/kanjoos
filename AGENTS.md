@@ -32,8 +32,13 @@ Reference model: **Qwen3-30B-A3B** (`models/qwen3-30b-a3b/config.json`) —
 48 layers, 128 experts/layer, top-8, hidden 2048, moe_intermediate 768, 32 heads
 / 4 KV heads × head_dim 128, vocab 151936, bf16, `tie_word_embeddings false`.
 
-**Target order:** gfx1201 on Windows 11 first → gfx1201 Linux → gfx1031
-Windows 11 + Linux.
+**Target order — gfx1201 is the primary card.** gfx1201 on Windows 11 first →
+gfx1201 Linux → gfx1031 Windows 11 + Linux. **gfx1031 is future work.** It stays
+a *declared* first-class target — the tier B census still compiles it, no RDNA2
+design may depend on hipBLASLt, and a gfx1031 refusal or skip is reported rather
+than omitted — but it is never the default, never the first thing measured, and
+**no current result is gated on it**. Anything that reads "gfx1031 first" is
+stale as of 2026-10-08.
 
 ---
 
@@ -45,9 +50,23 @@ kanjoos.toml          runtime configuration — starting values only, never trut
 docs/                 the design evidence: 00…09, COMPONENT-REFERENCE, MISSING-ITEMS
 ai-coder/             implementation worksheets c1…c24 — CONTRACTS, not suggestions
 kernels/              device code headers + knj_kernels.hip
-src/                  the runtime; only src/device/ is compiled C++ today
+src/                  the runtime; src/device/ is the only DEVICE C++, and the
+                      host side (loader, tokenizer, model, profiler, platform,
+                      util, cli) is built into knj_runtime + kanjoos-run
 tools/bench/          run_bench.sh (tier A/B/C gate) + device bench drivers
+tools/ref_qwen3moe.py  the numpy oracle for the reference model's forward pass
+tools/ref_qwen35.py    the numpy oracle + dequant cross-check for the qwen35 front end
 tools/{ci,doctor,i7,isa_probe,kvroof,route}/   the machine-audit tools
+tools/tok_crosscheck.py  tokenizer parity vs llama.cpp: the hand set, --corpus,
+                       --fuzz, and --separator-sweep (the 14-codepoint whitespace
+                       sweep). tools/tok_pre_rules.py re-derives the pre-tokeniser
+                       dispatch table from llama.cpp's actual regexes and pins it
+                       in tests/fixtures/tok/pre_rules.expected;
+                       tools/smoke_tools.py smokes both tools
+tools/c21/             profile_diff.py — the C21 regression gate (exit 1 on a
+                       regression; a re-pin needs a stated reason)
+tools/ggufmeta/        gguf_meta.py — read-only GGUF metadata/tensor dump; the
+                       tool behind docs/10's measured draft-model layouts
 models/                model config + provenance
 records/              raw measured output, kept verbatim
 tests/                host-side tests
@@ -55,10 +74,13 @@ cmake/                arch.cmake and friends
 build/                build output (ignore)
 ```
 
-The ONLY compiled C++ in the repository today is `src/device/`
-(`backend.cpp`, `backend.h`, `device_caps.h`) — component **C2**. Everything
-else is design, worksheets, and bench drivers. Do not assume a component exists
-because it is documented; check `src/` and `kernels/`.
+The only *device* C++ in the repository today is `src/device/` (`backend.cpp`,
+`backend.h`, `device_caps.h`) — component **C2**. The root CMake build also
+produces a host-only `knj_runtime` + `kanjoos-run` from `src/loader`,
+`src/tokenizer`, `src/model` (the `qwen3moe` forward pass and the `qwen35` front
+end), `src/profiler`, `src/platform` and `src/util`. Everything else is design,
+worksheets, and bench drivers. Do not assume a component exists because it is
+documented; check `src/` and `kernels/`.
 
 ---
 
@@ -325,6 +347,24 @@ python tools/i7/i7_bit_identity.py
 
 # routing locality
 python tools/route/route_locality.py
+
+# the host suite, including the python tool gates
+ctest --test-dir build/cmake-host --output-on-failure
+#   c21_profiler, tok_pre_dispatch, tok_whitespace_run -- C++ unit gates
+#   tools_smoke          the tokenizer tools' behaviour, asserted not exit-coded
+#   tok_separator_sweep  every separator in the engine's Space class vs llama.cpp
+#   tok_pre_rules        the pre-tokeniser table re-derived from llama.cpp's
+#                        actual regexes (name map + pre-type regex table) and the
+#                        oracle binary's own strings
+# A python gate whose input is missing prints NOT RUN and exits 3; ctest shows it
+# as SKIPPED with the reason, so an unrun gate never reads as a pass. Configure
+# with -DKNJ_PYTHON=<python.exe> if the first interpreter cmake finds lacks the
+# `gguf` package the fixture generator imports.
+
+# the same tools by hand, when the full report is wanted
+python tools/tok_crosscheck.py --model <file.gguf> --separator-sweep   # env: KNJ_TOK_MODEL
+python tools/tok_pre_rules.py                       # env: KNJ_LLAMA_CPP, --reference
+python tools/smoke_tools.py    # env: KNJ_TOK_MODEL, KNJ_ENGINE, KNJ_LLAMA_TOKENIZE
 ```
 
 Tier C drivers must be run arch-guarded:
@@ -354,8 +394,10 @@ When documents disagree:
 > **Never preserve an old statement merely because it is already written.**
 
 Reading order: `00` → `01` → `02` → `04` → `09` → `03` → `07` → `06` → `08` →
-`CODING-LOG` → `MISSING-ITEMS` → `COMPONENT-REFERENCE` → the applicable
-`ai-coder/c*.md` worksheets → the existing tests, tools and build files.
+`10` (the draft models — read it before `c20-speculation.md`, because it is the
+measured input that worksheet assumes) → `CODING-LOG` → `MISSING-ITEMS` →
+`COMPONENT-REFERENCE` → the applicable `ai-coder/c*.md` worksheets → the existing
+tests, tools and build files.
 
 ### Known-stale documentation (verified wrong, 2026-10-07)
 
@@ -365,7 +407,12 @@ Reading order: `00` → `01` → `02` → `04` → `09` → `03` → `07` → `0
 | `docs/00-verified-facts.md` §7.4a | the `_gfx12` operand layout is a blocking unknown | **closed** — rocWMMA owns the mapping |
 | `ai-coder/c2-device.md` | the WMMA path is gated behind the layout question | that gate is **superseded**; the rocWMMA gate replaces it |
 | `README.md` | "five real `config.json` files" | one model directory exists (`models/qwen3-30b-a3b/`) |
-| `CMakeLists.txt` header comment | gfx1031 is the primary target, gfx1201 "secondary/dev-bench" | the stated target order is **gfx1201 Win11 first** — this default is pending an explicit decision |
+
+> Fixed and removed from this table on **2026-10-08**: `CMakeLists.txt` no longer
+> says gfx1031 is primary — `KNJ_ARCH` defaults to `gfx1201`, and
+> `tools/bench/run_bench.sh` now runs its census and its tier C list
+> `gfx1201`-first. The row was deleted rather than struck through, because this
+> table lists what is wrong *now*, and a fixed entry is not.
 
 ---
 

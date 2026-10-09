@@ -35,6 +35,9 @@
 #   5  a tier C device run FAILED its own correctness check
 #   6  a pinned baseline in tools/bench/baselines.txt REGRESSED by more than
 #      the 10% tolerance (only reachable when tiers A and C both passed)
+#   7  a driver DECLARED an instruction in its KNJ_EXPECT line and the code
+#      object does not contain it. A declaration is a contract, not a comment:
+#      the cell is OK? and the runner fails. See the note above expect_check.
 #
 # A tier C driver also exits 6 when its code object is for a different arch than
 # the attached GPU. That is a skip, not a failure, and not a result: such a
@@ -45,6 +48,8 @@
 # mean the same thing there:
 #   OK       compiled, kernel emitted, and the expected instruction is present
 #   OK?      compiled, kernel emitted, but an expected instruction is MISSING
+#            -- and that FAILS the runner (exit 7). An OK? cell that still exits
+#            0 is a marker nobody is obliged to read.
 #   REFUSED  frontend rejected the source (bad spelling or a feature gate)
 #   CRASH    backend crashed
 #   EMPTY    exit 0 but the code object contains no kernel
@@ -53,6 +58,11 @@ set -uo pipefail
 
 HOST_ONLY=0
 if [ "${1:-}" = "--host-only" ]; then HOST_ONLY=1; shift; fi
+
+# Tier B declared-instruction accounting. Declared here, next to the exit-code
+# contract, so the final decision cannot read an unset variable under `set -u`.
+EXPECT_MISSING=0
+MISSING_LIST=""
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
@@ -80,7 +90,7 @@ if [ -z "$HOSTCXX" ]; then
   done
 fi
 
-read -r -a ARCHS <<< "${*:-gfx1031 gfx1201}"
+read -r -a ARCHS <<< "${*:-gfx1201 gfx1031}"
 [ "$HOST_ONLY" = 1 ] && ARCHS=()
 
 BENCHES=()
@@ -101,6 +111,26 @@ arch_flags() {
 # A bench declares what it must contain:
 #   // KNJ_EXPECT: knj_gemm_wmma_f16 = v_wmma_f32_16x16x16_f16, knj_gemm_w4a4 = v_dot8_i32_i4
 expect_map() { grep -oE 'KNJ_EXPECT:.*' "$1" | head -1 | sed 's/KNJ_EXPECT://'; }
+
+# The body of ONE kernel in a .s file: from its `name:` label to the next
+# top-level identifier label. AMDGPU emits internal labels as `.LBB0_1:` (a
+# leading dot) and the function end as `.Lfunc_end`, so a top-level identifier
+# label is exactly a function boundary.
+#
+# This is per-kernel on purpose. A file-wide grep for a declared instruction
+# passes whenever ANY kernel in the file happens to contain it, so a declaration
+# naming kernel A is satisfied by kernel B -- and a kernel that was declared but
+# never emitted at all passes on the strength of its neighbours. Both are
+# exactly the OK? cells tier B exists to catch, and neither is visible to a
+# whole-file search.
+kernel_body() { # $1 = .s file, $2 = kernel name
+  awk -v k="$2" '
+    $0 ~ "^" k ":"                        { inside = 1; next }
+    inside && /^[a-zA-Z_][a-zA-Z0-9_]*:/  { exit }
+    inside && /\.Lfunc_end/               { exit }
+    inside                                { print }
+  ' "$1"
+}
 
 # Kernels this bench is supposed to define, from the extern "C" kernel decls.
 kernel_list() { grep -oE 'void (knj_[a-z0-9_]+)\(' "$1" | sed 's/void //;s/($//;s/(//' | sort -u; }
@@ -356,18 +386,55 @@ for arch in "${ARCHS[@]}"; do
         for (k in dot) printf "    dot    %-28s x%d\n", k, dot[k]
       }' "$TMP/$b.$arch.s" | sort
 
-    # Declared expectation check.
+    # Declared expectation check -- a FAILING gate, not a label.
+    #
+    # KNJ_EXPECT is a contract: "this driver emits this instruction". When the
+    # code object does not contain it, the tier B cell is OK? and EXPECT_RC is
+    # set, so the runner exits 7. The measured instruction must be inside the
+    # NAMED kernel (kernel_body), not merely somewhere in the file.
+    #
+    # A declaration may carry an arch glob, which is how a contract that is true
+    # for one target and false for another is stated honestly instead of turned
+    # off:
+    #   // KNJ_EXPECT: knj_a = v_dot8_i32_i4, @gfx9* knj_b = v_dot4_i32_i8
+    # A scoped entry that does not name the arch under census is reported as
+    # `scoped`, never silently dropped: "not applicable" and "passed" are
+    # different results (AGENTS.md section 4, rule 9).
     exp="$(expect_map "$src")"
     if [ -n "$exp" ]; then
       IFS=',' read -ra pairs <<< "$exp"
       for p in "${pairs[@]}"; do
-        kern="$(echo "$p" | sed 's/ *=.*//' | tr -d ' ')"
-        insn="$(echo "$p" | sed 's/.*= *//' | tr -d ' ')"
+        left="${p%%=*}"
+        right="${p#*=}"
+        [ "$right" = "$p" ] && continue          # no '=' at all
+        insn="$(printf '%s' "$right" | tr -d ' ')"
         [ -z "$insn" ] && continue
-        if grep -q "$insn" "$TMP/$b.$arch.s"; then
+        scope=""
+        left="$(printf '%s' "$left" | sed 's/^[[:space:]]*//')"
+        case "$left" in
+          @*)
+            scope="$(printf '%s' "$left" | sed 's/^@//' | cut -d' ' -f1)"
+            left="$(printf '%s' "$left" | cut -d' ' -f2-)"
+            ;;
+        esac
+        kern="$(printf '%s' "$left" | tr -d ' ')"
+        [ -z "$kern" ] && continue
+        matched_scope=1
+        if [ -n "$scope" ]; then
+          matched_scope=0
+          case "$arch" in $scope) matched_scope=1 ;; esac
+        fi
+        if [ "$matched_scope" = 0 ]; then
+          printf '  expect %-24s %-30s scoped %s (not standing for %s)\n' \
+                 "$kern" "$insn" "$scope" "$arch"
+          continue
+        fi
+        if kernel_body "$TMP/$b.$arch.s" "$kern" | grep -q -- "$insn"; then
           printf '  expect %-24s %-30s PRESENT\n' "$kern" "$insn"
         else
-          printf '  expect %-24s %-30s MISSING  <-- OK? cell\n' "$kern" "$insn"
+          printf '  expect %-24s %-30s MISSING  <-- OK? cell, FAILS the runner\n' "$kern" "$insn"
+          EXPECT_MISSING=$((EXPECT_MISSING + 1))
+          MISSING_LIST="$MISSING_LIST\n    $b [$arch] $kern did not emit $insn"
         fi
       done
     fi
@@ -388,6 +455,7 @@ echo "==========================================================================
 # Entries are arch-scoped: a gfx1031 run is never judged by gfx1201 pins.
 BASELINE_FILE="$HERE/baselines.txt"
 BASELINE_RC=0
+EXPECT_RC=0
 check_baseline() { # arch driver out_file
   [ -f "$BASELINE_FILE" ] || return 0
   local arch="$1" b="$2" out="$3" e_arch drv metric dir val pat got bad
@@ -564,8 +632,21 @@ if [ $TIER_C_RC -ne 0 ]; then
   echo
   echo "TIER C FAILED — a timed kernel disagreed with its oracle on a real GPU."
 fi
+# A missing declared instruction is a capability that was claimed and not
+# delivered, so it outranks a baseline regression (which is a slowdown, not a
+# falsehood) -- but both are reported before either exit code is returned.
+if [ "${EXPECT_MISSING:-0}" -ne 0 ]; then
+  EXPECT_RC=7
+  echo
+  echo "TIER B EXPECTATION FAILED -- $EXPECT_MISSING declared instruction(s) were"
+  echo "not emitted. A KNJ_EXPECT line is a contract, so this is a capability that"
+  echo "was claimed and not delivered: the cell is OK? and the runner fails."
+  printf '%b\n' "$MISSING_LIST"
+  echo "Fix the kernel, or state the truth with an arch scope: '@gfx1031 <kernel> = <insn>'."
+fi
 [ $TIER_A_RC -ne 0 ] && exit $TIER_A_RC
 [ $TIER_C_RC -ne 0 ] && exit $TIER_C_RC
+[ $EXPECT_RC -ne 0 ] && exit $EXPECT_RC
 if [ $BASELINE_RC -ne 0 ]; then
   echo
   echo "BASELINE REGRESSION - a pinned number in tools/bench/baselines.txt got"

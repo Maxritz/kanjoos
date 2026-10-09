@@ -3,6 +3,13 @@
 Windows 11 and Linux are both first-class. ROCm 10.1 is the baseline. Two GPU
 targets: RDNA4 `gfx1201` and RDNA2 `gfx1031`.
 
+> **Target order (2026-10-08): `gfx1201` is the primary card; `gfx1031` is
+> future work.** Everything measured, pinned, or gated today is gfx1201 on
+> Windows 11. gfx1031 remains a *declared* target — the tier B census still
+> compiles it, its refusals are reported as refusals — but it is never the
+> default and no current gate depends on it. `KNJ_ARCH` defaults to `gfx1201`;
+> `tools/bench/run_bench.sh` lists `gfx1201` first.
+
 ---
 
 ## 1. Toolchain facts on this machine
@@ -17,7 +24,8 @@ targets: RDNA4 `gfx1201` and RDNA2 `gfx1031`.
 Consequences that shape the build:
 
 * **gfx1031 is a supported target, not a hack.** It is release-ready in the Linux
-  channel; the plan treats it as a first-class backend.
+  channel; the plan treats it as a first-class *declared* backend — and, per the
+  target order above, as **future work**, not the current one.
 * **hipBLASLt exists for gfx1201 and not for gfx1031.** No RDNA2 design in this
   plan may depend on hipBLASLt.
 * **The gfx1031 blas kpack carries prebuilt Tensile kernels** (44.5 MB) — the

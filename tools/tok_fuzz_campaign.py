@@ -231,7 +231,7 @@ def main(argv: list[str] | None = None) -> int:
     for seed in seeds:
         log_name = f"seed{seed}-{per_seed}.log" if per_seed else f"seed{seed}.log"
         log_path = os.path.join(RECORDS, log_name)
-        print(f"seed {seed}: logging to {log_path}")
+        print(f"seed {seed}: logging to {log_path}", flush=True)
         with open(log_path, "a", encoding="utf-8") as log:
             log.write(f"\n===== seed {seed}, {per_seed} prompts, "
                       f"{run_meta['crosscheck_sha256']} =====\n")
@@ -241,6 +241,11 @@ def main(argv: list[str] | None = None) -> int:
             log.write(f"KNJ_LLAMA_TOKENIZE={os.environ.get('KNJ_LLAMA_TOKENIZE')}\n")
             log.write(f"KNJ_ENGINE={os.environ.get('KNJ_ENGINE')}\n")
             log.write(f"fuzz_seed={fuzz_seed}  per_seed={per_seed}\n\n")
+            # Flush the header now: this run streams its RESULT rows only after
+            # the cross-check exits (stdout is captured), so an unflushed header
+            # made a healthy two-hour run indistinguishable from a dead one --
+            # the log still ended at the previous run's rc marker until exit.
+            log.flush()
 
             cmd = [sys.executable, CROSS, "--model", model, "--engine", engine,
                    "--llama-tokenize", tokenize,
@@ -255,6 +260,7 @@ def main(argv: list[str] | None = None) -> int:
                 log.write("\n--- stderr ---\n")
                 log.write(p.stderr)
             log.write(f"\nrc={p.returncode}\n")
+            log.flush()
 
             row = per_seed_from_log(p.stdout, per_seed)
             row["seed"] = seed
