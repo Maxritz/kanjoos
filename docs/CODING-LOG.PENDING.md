@@ -1179,6 +1179,59 @@ and gfx1031's compile-only status. Nothing in this phase is PARTIAL except the
 claim scope: only the whitespace alternatives were re-derived against the
 reference; the other six alternatives are still emulated from their prose.
 
+# Phase 53 — the engine's tokenize-only path opens metadata only; the reference side stays untouched  ·  PARTIAL
+
+**Believed at the time**   Phase 52's `--tokenize-only` still paid a full
+`Model::open` (~300 ms: tensor-shape validation, ThreadPool, KV sizing) per
+prompt just to reach the tokenizer, and the reference side (llama-tokenize,
+two calls per prompt at ~428 ms each) had been floated as the next target.
+
+**Decision**   Fix OUR engine only; reject the reference-side batching idea —
+llama.cpp is the oracle and stays a black box. The tokenizer path now opens
+the GGUF header and the tokenizer directly (`GgufFile::open` +
+`Tokenizer::from_gguf`) and returns before `Model::open` exists. Chosen
+because none of Model::open's work can change a token id. Rejected: keeping
+the full open "for refusal parity" — the refusals that matter (unreadable
+container → REFUSED 3, dflash → its dedicated REFUSED block, unknown arch →
+read_geometry's own words, bad tokenizer → `error:` exit 1) are reproduced
+exactly; only *tensor-shape* refusals stop firing on this path, recorded here
+because a malformed tensor cannot make tokenization wrong.
+
+**Changed**   `src/cli/main.cpp` — the arch-sniff `GgufFile` is hoisted and
+reused (one open per invocation, not two); the tokenize-only block handles
+dflash/unknown-arch/qwen35/qwen3moe with each arch's existing marker and exit
+code; the dead post-`finish()` tokenize-only early return is removed. This also
+fixes an over-escaped `printf` in Phase 52's qwen35 tokenize-only branch
+(`\\\"`/`\\n` printed literal backslashes and no newline — unobserved because
+the model at hand is qwen3moe).
+
+**Verified**
+```
+$ cmake --build build/cmake-host --target kanjoos-run                 # exit 0
+$ kanjoos-run --prompt-file <s417> --tokenize-only --ctx 1
+  # exit 0, `prompt ids : 81093 126 243 126 227 126 226`, no prefill
+$ kanjoos-run --prompt-file <s417> --tokenize-only --profiling
+  # exit 0, ids + the metadata-open profile table
+$ kanjoos-run --prompt-file <s417> --dump-tokens -n 0 --ctx 1
+  # exit 1, `error: prompt longer than the context` on stderr (unchanged)
+$ python tools/tok_crosscheck.py --strings-file <s417>   # exit 0, 1/1 PASS vs llama.cpp
+$ python tools/smoke_tools.py                            # exit 0, all smokes pass
+```
+
+**Measurements**
+
+| quantity | value | provenance |
+|---|---|---|
+| engine tokenize-only, before (Phase 52, `Model::open`) | mean 303.5 ms (n=8) | MEASURED, this session |
+| engine tokenize-only, after (metadata open) | mean 96.7 ms (min 89.2, max 128.0, n=10) | MEASURED |
+| engine tokenize-only, original (`-n 0`, prefill) | mean 895.5 ms (n=8) | MEASURED |
+| per prompt (engine + 2× llama-tokenize) | ~1751 → ~1159 → ~950 ms | DERIVED |
+| seed 1, 5000 prompts, wall time | **RUNNING** (background, wall_seconds written to `records/tok-fuzz-5000/seed1-5000.metadata.out` on exit) | not a result until it exits |
+
+**Still open**   The re-measured 5000-prompt wall time — RUNNING. Unblocked by:
+time (~80 min at the derived rate; llama-tokenize ×2 is now 856 ms of the
+~950 ms/prompt and is deliberately out of scope per the decision above).
+
 # Phase 52 — the 5000-prompt campaign never finished; the `main[cold]` throw was a parse-time unknown argument, and every prompt paid for a prefill  ·  PARTIAL
 
 **Believed at the time**   The campaign's seed-1 5000-prompt run ended as an

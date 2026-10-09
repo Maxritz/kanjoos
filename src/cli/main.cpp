@@ -330,11 +330,12 @@ int main(int argc, char** argv) {
     // model for a target this engine cannot run yet; it is refused with the
     // reason rather than with the generic architecture message.
     {
+      knj::GgufFile file;
       std::string arch;
       try {
-        knj::GgufFile sniff = knj::GgufFile::open(a.model);
-        if (sniff.has("general.architecture")) {
-          arch = sniff.meta_string("general.architecture");
+        file = knj::GgufFile::open(a.model);
+        if (file.has("general.architecture")) {
+          arch = file.meta_string("general.architecture");
         }
       } catch (const std::exception& e) {
         std::printf("model      : %s\n", a.model.c_str());
@@ -343,20 +344,69 @@ int main(int argc, char** argv) {
                     "             the same file and prints its header and tensor table.\n");
         return 3;
       }
-      if (arch == "qwen35" && a.tokenize_only) {
-        // The qwen35 probe normally returns 3 after its front-end report because
-        // it does not produce logits. Tokenizer cross-checks need an honest 0
-        // from tokenization alone, without entering that probe or its forward path.
+      if (arch == "dflash") {
+        std::printf("model      : %s\n", a.model.c_str());
+        std::printf("REFUSED    : architecture 'dflash' is a *draft* model, not a language\n"
+                    "             model. It carries no token_embd and no output.weight: it\n"
+                    "             conditions on a target model's hidden states and emits a\n"
+                    "             block of tokens. There is nothing here for it to draft\n"
+                    "             against, and the C20 loader is not implemented.\n");
+        std::printf("             Measured layouts: docs/10-dflash-draft-models.md\n"
+                    "             Owning worksheet: ai-coder/c20-speculation.md\n");
+        return 3;
+      }
+      // --tokenize-only needs ONLY metadata: the GGUF header and the tokenizer.
+      // Model::open also validates every tensor's shape, builds the ThreadPool
+      // and sizes the KV cache (~300 ms here); none of that can change a token
+      // id, and a tokenizer cross-check pays it once per prompt. Refusals keep
+      // their existing shape: an unreadable container is REFUSED 3 above, a
+      // dflash file keeps its dedicated REFUSED block, an unknown architecture
+      // is refused by name below in the same words Model::read_geometry uses, a
+      // tokenizer the file cannot build throws from from_gguf and is reported
+      // as `error: ...` exit 1 -- what Model::open would report. (Deliberate
+      // difference: tensor-shape refusals no longer fire on this path; a
+      // malformed tensor cannot make tokenization wrong, and validating it is
+      // the cost being removed.)
+      if (a.tokenize_only) {
         try {
-          const knj::GgufFile file = knj::GgufFile::open(a.model);
+          if (arch == "qwen35") {
+            // The qwen35 probe normally returns 3 after its front-end report
+            // because it does not produce logits. Tokenizer cross-checks need
+            // an honest 0 from tokenization alone, and the same `id(s):` marker
+            // the probe prints, without entering the probe or its forward path.
+            const knj::Tokenizer tok = knj::Tokenizer::from_gguf(file);
+            const std::vector<int32_t> ids = tok.encode(a.prompt, false);
+            std::printf("probe text \"%s\" -> %zu id(s):", a.prompt.c_str(), ids.size());
+            for (int32_t id : ids) std::printf(" %d", id);
+            std::printf("\n");
+            return 0;
+          }
+          if (arch != "qwen3moe") {
+            throw std::runtime_error("model: architecture is '" + arch +
+                                     "', this forward pass only implements 'qwen3moe'");
+          }
           const knj::Tokenizer tok = knj::Tokenizer::from_gguf(file);
-          const std::vector<int32_t> ids = tok.encode(a.prompt, false);
-          std::printf("probe text \\\"%s\\\" -> %zu id(s):", a.prompt.c_str(), ids.size());
+          std::vector<int32_t> ids = tok.encode(a.prompt, false);
+          if (tok.add_bos() && tok.bos_id() >= 0) ids.insert(ids.begin(), tok.bos_id());
+          if (ids.empty()) throw std::runtime_error("prompt tokenised to nothing");
+          std::printf("prompt ids :");
           for (int32_t id : ids) std::printf(" %d", id);
-          std::printf("\\n");
+          std::printf("\n");
+          std::printf("prompt     : %zu tokens, round-trip \"%s\"\n", ids.size(),
+                      tok.decode(ids).c_str());
+          if (a.profiling) {
+            // A profiled run still ends with its table (docs/06). There is no
+            // model on this path, so the header says what was NOT measured.
+            knj::Profiler& p = knj::Profiler::get();
+            p.print_header(stdout, "0.1.0",
+                           "tokenize-only (metadata open; no model, no device)",
+                           "vram NOT MEASURED here   ram NOT MEASURED here");
+            p.report(stdout);
+            p.write_dir();
+          }
           return 0;
         } catch (const std::exception& e) {
-          std::fprintf(stderr, "error: %s\\n", e.what());
+          std::fprintf(stderr, "error: %s\n", e.what());
           return 1;
         }
       }
@@ -381,17 +431,6 @@ int main(int argc, char** argv) {
           p.write_dir();
         }
         return rc;
-      }
-      if (arch == "dflash") {
-        std::printf("model      : %s\n", a.model.c_str());
-        std::printf("REFUSED    : architecture 'dflash' is a *draft* model, not a language\n"
-                    "             model. It carries no token_embd and no output.weight: it\n"
-                    "             conditions on a target model's hidden states and emits a\n"
-                    "             block of tokens. There is nothing here for it to draft\n"
-                    "             against, and the C20 loader is not implemented.\n");
-        std::printf("             Measured layouts: docs/10-dflash-draft-models.md\n"
-                    "             Owning worksheet: ai-coder/c20-speculation.md\n");
-        return 3;
       }
     }
 
@@ -454,15 +493,6 @@ int main(int argc, char** argv) {
       p.report(stdout);
       p.write_dir();
     };
-
-    // Tokenization is a complete result: ids printed, report emitted, exit 0
-    // BEFORE the context check and before prefill. The context bound and the
-    // forward pass belong to generation; a tokenizer cross-check must not pay
-    // for either (and must not fail on them).
-    if (a.tokenize_only) {
-      finish();
-      return 0;
-    }
 
     if ((int)prompt.size() >= a.n_ctx) {
       throw std::runtime_error("prompt longer than the context");
