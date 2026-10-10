@@ -4,7 +4,7 @@
 // ------------
 // Two DISTINCT kernels, per docs/02-components.md C16 and ai-coder/c16:
 //   attn_prefill - tiled Q-block x KV-block, online (streaming) softmax.
-//                  One workgroup owns QT=8 query rows; K/V stream through
+//                  One workgroup owns QT=16 query rows; K/V stream through
 //                  LDS in small tiles (KT=16), so each kv-head's K/V reach DRAM
 //                  once and are re-served from the 64 MB Infinity Cache
 //                  to the (S/QT) workgroups that share them.
@@ -69,8 +69,14 @@
 #define KTD 32     /* decode KV tile rows: decode is 1 wave/block so
                      * bigger tiles win on staging cadence (16 was
                      * worse than 32: 208.7 vs 194.3 us/step).      */
-#define QT 8       /* query rows per prefill workgroup          */
-#define BLKP 64    /* prefill threads (2 waves -> 2 q rows)     */
+#define QT 16      /* query rows per prefill workgroup: 8 -> 16 (2026-10-10,
+                     * residency sweep QT8 = 9.6 ms, QT16 = 5.0 ms at identical
+                     * 1.38e-04 spot-oracle error; 4 waves/block = 20 waves/CU
+                     * of LDS budget vs 12 before, which is what hides the
+                     * serial score chain)                         */
+#define BLKP 128   /* prefill threads (4 waves -> 4 q rows; every rstep loop
+                     * strides by BLKP/32, so the wave count is a constant,
+                     * not a second edit)                          */
 #define BLKD 32    /* decode threads (1 wave)                   */
 
 #define F2H(f) (__builtin_bit_cast(uint16_t, (_Float16)(f)))
@@ -150,7 +156,7 @@ __global__ void attn_prefill(const uint16_t *__restrict__ Q,
     for (int j0 = 0; j0 < S; j0 += KT) {
         KNJ_STAGE(KL, K + (size_t)(kvh * S + j0) * HD, KT * HD / 2, tid, BLKP);
         KNJ_STAGE(VL, V + (size_t)(kvh * S + j0) * HD, KT * HD / 2, tid, BLKP);
-        __syncthreads();        for (int rstep = 0; rstep < QT; rstep += 2) {
+        __syncthreads();        for (int rstep = 0; rstep < QT; rstep += BLKP / 32) {
             const int rloc = rstep + w;       /* wave w owns this q row  */
             const int rg = r0 + rloc;         /* global row, for causal  */
             /* Q is invariant over j: load once per rstep, not per j.  */
@@ -204,9 +210,17 @@ __global__ void attn_prefill(const uint16_t *__restrict__ Q,
                 m[rloc] = mm;
             }
         }
+        /* Loop-bottom barrier: the next j0 iteration's KNJ_STAGE overwrites
+         * KL/VL in LDS. The top-of-loop barrier only syncs threads that have
+         * arrived, so without this a fast wave stages tile j0+1 while a
+         * straggler is still reading tile j0 -- a cross-iteration LDS race.
+         * Found 2026-10-10: QT=16 tripped it 9/9 runs (spot oracle 2e-2),
+         * the QT=8 baseline ~1/4 (one RESULT: FAIL in 4 runs). Costs nothing
+         * measurable at QT=8 (9.6 ms before and after). */
+        __syncthreads();
     }
 
-    for (int rstep = 0; rstep < QT; rstep += 2) {
+    for (int rstep = 0; rstep < QT; rstep += BLKP / 32) {
         const int rloc = rstep + w;
         const float inv = 1.0f / l[rloc];
         uint16_t *orow = O + (size_t)(hq * S + r0 + rloc) * HD;

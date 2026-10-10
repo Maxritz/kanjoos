@@ -316,7 +316,12 @@ int main(int argc, char** argv) {
     pc.detail = a.profile_detail;
     pc.dir = a.profile_dir;
     pc.floor_ops = a.profile_floor;
-    pc.warmup_steps = a.profile_warmup;
+    // --tokenize-only is a one-shot path: it never calls step_done(), so any
+    // warmup discards the ONLY measurement and the table prints ops 0 (seen
+    // 2026-10-10: all scopes landed in nested_ops_ with zero rows). Warmup
+    // exists to drop unsteady first STEPS; with no steps there is nothing to
+    // drop, and dropping the run's single sample is the bug, not the feature.
+    pc.warmup_steps = a.tokenize_only ? 0 : a.profile_warmup;
     pc.subtract_floor = !a.profile_no_subtract;
     knj::Profiler& prof = knj::Profiler::get();
     prof.configure(pc);
@@ -333,6 +338,7 @@ int main(int argc, char** argv) {
       knj::GgufFile file;
       std::string arch;
       try {
+        KNJ_PROFILE_OP("gguf-open");
         file = knj::GgufFile::open(a.model);
         if (file.has("general.architecture")) {
           arch = file.meta_string("general.architecture");
@@ -385,8 +391,16 @@ int main(int argc, char** argv) {
             throw std::runtime_error("model: architecture is '" + arch +
                                      "', this forward pass only implements 'qwen3moe'");
           }
-          const knj::Tokenizer tok = knj::Tokenizer::from_gguf(file);
-          std::vector<int32_t> ids = tok.encode(a.prompt, false);
+          // Profiled stages (docs/06): the two phases that can cost anything
+          // on this path, measured separately so a regression names its stage.
+          const knj::Tokenizer tok = [&] {
+            KNJ_PROFILE_OP("tokenizer-build");
+            return knj::Tokenizer::from_gguf(file);
+          }();
+          std::vector<int32_t> ids = [&] {
+            KNJ_PROFILE_OP("encode");
+            return tok.encode(a.prompt, false);
+          }();
           if (tok.add_bos() && tok.bos_id() >= 0) ids.insert(ids.begin(), tok.bos_id());
           if (ids.empty()) throw std::runtime_error("prompt tokenised to nothing");
           std::printf("prompt ids :");

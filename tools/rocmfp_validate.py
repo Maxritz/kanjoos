@@ -17,6 +17,7 @@ Exit 1 on any mismatch.
 """
 import argparse
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -36,13 +37,26 @@ TYPES = {
 NBLOCKS = 4  # blocks per case: covers cross-block state (there is none, prove it)
 
 
+def probe_env():
+    # Same MinGW-DLL handling as tools/dequant_validate.py: prepend the
+    # compiler's bin dir so standalone probe/reference runs work without
+    # staged DLL copies (a missing DLL otherwise reads as FileNotFoundError).
+    e = dict(os.environ)
+    g = shutil.which("g++")
+    if g and sys.platform == "win32":
+        b = os.path.dirname(g)
+        e["PATH"] = b + os.pathsep + e.get("PATH", "")
+    return e
+
+
 def run_decoder(exe, args, blob, n, tmp, tag):
     bp = os.path.join(tmp, f"{tag}.bin")
     op = os.path.join(tmp, f"{tag}.f32")
     with open(bp, "wb") as f:
         f.write(blob)
     r = subprocess.run([exe] + args + [bp, str(n), op],
-                       capture_output=True, text=True, timeout=120)
+                       capture_output=True, text=True, timeout=120,
+                       env=probe_env())
     if r.returncode != 0:
         return None, f"rc={r.returncode} {r.stderr.strip()[:100]}"
     return np.fromfile(op, dtype=np.float32), ""

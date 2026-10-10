@@ -13,6 +13,7 @@ Exit 1 on any mismatch past tolerance.
 """
 import argparse
 import os
+import shutil
 import struct
 import subprocess
 import sys
@@ -42,13 +43,28 @@ GGUF_CODEC = set(GEOM) - {"Q8_1", "Q8_K", "Q1_0"}
 TOL = 1e-5
 
 
+def probe_env():
+    # MinGW probe binaries need libstdc++-6.dll et al. at load; a missing DLL
+    # surfaces as FileNotFoundError, not a loader error. Inherit everything
+    # and prepend the compiler that (presumably) built the probe, so standalone
+    # runs work without staged DLL copies. ctest does the same via CMake's
+    # ENVIRONMENT_MODIFICATION; this is the no-CMake equivalent.
+    e = dict(os.environ)
+    g = shutil.which("g++")
+    if g and sys.platform == "win32":
+        b = os.path.dirname(g)
+        e["PATH"] = b + os.pathsep + e.get("PATH", "")
+    return e
+
+
 def run_probe(probe, tname, blob, n, tmp):
     bp = os.path.join(tmp, f"{tname}.bin")
     op = os.path.join(tmp, f"{tname}.f32")
     with open(bp, "wb") as f:
         f.write(blob)
     r = subprocess.run([probe, tname, bp, str(n), op],
-                       capture_output=True, text=True, timeout=120)
+                       capture_output=True, text=True, timeout=120,
+                       env=probe_env())
     if r.returncode != 0:
         return None, f"probe rc={r.returncode}: {(r.stderr or '').strip()[:200]}"
     return np.fromfile(op, dtype=np.float32), ""

@@ -7,6 +7,7 @@
 #include <cstring>
 #include <stdexcept>
 
+#include "src/profiler/profiler.h"
 #include "src/tokenizer/unicode_ranges.h"
 
 namespace knj {
@@ -312,9 +313,21 @@ Tokenizer Tokenizer::from_gguf(const GgufFile& f) {
     fail("tokenizer.ggml.tokens missing or not an array");
   const MetaValue& toks = it->second;
   tk.tokens_.reserve(toks.arr.size());
-  for (size_t i = 0; i < toks.arr.size(); ++i) {
-    tk.tokens_.push_back(toks.arr[i].s);
-    tk.token_to_id_.emplace(toks.arr[i].s, (int32_t)i);
+  // Reserve the lookup map too. Without it libstdc++ grows the bucket array ~18
+  // times over a 152K-vocab insert run, and each growth re-hashes every key
+  // already present -- and each growth would also be a reallocation the views
+  // below point into. Both costs are pure overhead: the final table is
+  // identical either way.
+  tk.token_to_id_.reserve(toks.arr.size());
+  {
+    KNJ_PROFILE_OP("tok-vocab");
+    for (size_t i = 0; i < toks.arr.size(); ++i) {
+      tk.tokens_.push_back(toks.arr[i].s);
+      // The map key is a VIEW into tokens_, not a second copy. `reserve` above
+      // means `back()`'s address cannot move again, and no later mutation of
+      // tokens_ exists, so the view lives as long as the Tokenizer does.
+      tk.token_to_id_.emplace(std::string_view(tk.tokens_.back()), (int32_t)i);
+    }
   }
 
   tk.special_.assign(tk.tokens_.size(), 0);
@@ -329,7 +342,17 @@ Tokenizer Tokenizer::from_gguf(const GgufFile& f) {
 
   auto mg = f.metadata().find("tokenizer.ggml.merges");
   if (mg != f.metadata().end() && mg->second.is_array()) {
+    KNJ_PROFILE_OP("tok-merges");
+    // One arena for every "left right" key, instead of 152K separate strings
+    // copied into map nodes: the bytes are laid end to end and the map stores
+    // views into them. The arena is sized first so no append can reallocate
+    // under a view already handed to the map.
+    size_t arena_bytes = 0;
+    for (const MetaValue& m : mg->second.arr) arena_bytes += m.s.size();
+    tk.merge_arena_.reserve(arena_bytes);
+    tk.merge_rank_.reserve(mg->second.arr.size());  // same re-hash tax as above
     int32_t rank = 0;
+    size_t off = 0;
     for (const MetaValue& m : mg->second.arr) {
       // A merge is "left right" with one space. A file that does not use that
       // spelling would make every lookup miss -- which is silent, so it is a
@@ -339,7 +362,10 @@ Tokenizer Tokenizer::from_gguf(const GgufFile& f) {
              " has no space in it (\"" + m.s.substr(0, 24) +
              "\": this is not the 'left right' spelling byte-level BPE uses");
       }
-      tk.merge_rank_.emplace(m.s, rank++);
+      tk.merge_arena_.append(m.s);
+      tk.merge_rank_.emplace(std::string_view(tk.merge_arena_).substr(off, m.s.size()),
+                             rank++);
+      off += m.s.size();
     }
   }
 
@@ -399,7 +425,7 @@ namespace {
 // out as 64 byte ids where llama.cpp emits 8 merged tokens, and any non-ASCII
 // text came out as raw bytes.
 std::vector<std::string> bpe_symbols(const std::string& chunk,
-                                     const std::unordered_map<std::string, int32_t>& ranks) {
+                                     const TokViewMap& ranks) {
   const ByteMap& bm = byte_map();
   std::vector<std::string> syms;
   for (size_t i = 0; i < chunk.size(); ++i) {
@@ -419,9 +445,8 @@ std::vector<std::string> bpe_symbols(const std::string& chunk,
         // at all, so no merge ever fired and every chunk was emitted from its
         // whole-vocab lookup or its byte fallback.
         merged = syms[i] + " " + syms[i + 1];
-        auto it = ranks.find(merged);
-        if (it != ranks.end() && it->second < best_rank) {
-          best_rank = it->second;
+        if (const int32_t* r = ranks.find(merged); r && *r < best_rank) {
+          best_rank = *r;
           best_i = i;
         }
       }
@@ -472,9 +497,8 @@ std::vector<int32_t> Tokenizer::encode(const std::string& text, bool parse_speci
     const std::string seg = text.substr(seg_start, end - seg_start);
     for (const std::string& chunk : pretokenize(seg, pre_rule_)) {
       for (const std::string& sym : bpe_symbols(chunk, merge_rank_)) {
-        auto it = token_to_id_.find(sym);
-        if (it != token_to_id_.end()) {
-          ids.push_back(it->second);
+        if (const int32_t* id = token_to_id_.find(sym)) {
+          ids.push_back(*id);
           continue;
         }
         // A symbol the vocabulary does not contain. This cannot happen for a

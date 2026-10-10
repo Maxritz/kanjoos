@@ -1492,3 +1492,38 @@ That was stale: the working copy already decoded Q4_1/Q5_0/Q5_1/Q8_1/Q1_0/TQ1_0/
 | full ctest + rocmfp battery | exit 0 / exit 0 | MEASURED |
 
 **Still open**   gfx1031 tier-C needs hardware. Upstream-divergence risk on ids 100+ now has a protocol instead of just a worry.
+
+### Phase 58 — leftover items closed: rdna4-wmma-guide summary, durable probe DLL path, README rewritten  ·  DONE
+
+**Believed at the time**   The "linked article" item was blocked on a missing
+web-fetch tool, and standalone probes needed staged DLL copies.
+
+**Decision**   Both were solvable with tools already here: raw network via
+curl (the same path that fetched PR #42's diff), and a `PATH` prepend inside
+the validators (the no-CMake equivalent of the ctest fix). The user also
+ordered the remaining workstreams committed/pushed plus a full README.
+
+**Changed**
+- `tools/dequant_validate.py`, `tools/rocmfp_validate.py` — `probe_env()`
+  prepends the `g++` bindir to the probe subprocess `PATH`. Proven by hiding
+  every staged DLL: both batteries pass with absolute paths and zero DLLs
+  beside the exes. (Relative exe paths still fail under this Python/Windows
+  pairing — absolute paths stay mandatory, as the README says.)
+- `README.md` — rewritten as the full project account: what/why/five
+  differences/non-goals, measured-vs-plan status table, repo map, commands.
+  Fixes the stale "five config.json files" claim (one model dir exists).
+- Article summary (JohnTDI-cpu/rdna4-wmma-guide, fetched raw, 238 lines):
+  gfx12 WMMA is column-distributed (`VGPR[lane][j] = matrix[(lane/16)*8+j]
+  [lane%16]`; lanes 0-15 rows 0-7, 16-31 rows 8-15), same principle as CDNA
+  MFMA, verified FP16 (rel err < 0.08%) and INT4 (asymmetric matrices;
+  identity-times-constant tests CANNOT distinguish the transpose — matches
+  this repo's full-output doctrine). Fused MXFP4 WMMA GEMM: 40.8 TFLOPS (53%
+  of peak), 3.8x vs dequant+hipBLAS at batch<=32, TILE_K=32 = E8M0 block.
+  Corroborates this repo's rocWMMA-owns-the-layout decision and the MXFP4
+  direction; lane mapping is hardware, stable across ROCm versions.
+
+**Verified**
+- DLLs hidden → rocmfp battery exit 0 AGREE; dequant 20/20 exit 0 AGREE.
+- `git log origin/main` carries ccbdfd7; this commit is its follow-up.
+
+**Still open**   gfx1031 tier-C needs hardware. Fork-id protocol stands.

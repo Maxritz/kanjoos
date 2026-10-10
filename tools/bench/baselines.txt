@@ -39,7 +39,11 @@
 #               TK=32; A/B: TK16=21.0, TK32=21.8, TK64=21.7)
 #   attn_c16 PREFILL_US  40542 (KT64, LDS reduce) -> 9624 (butterfly reduce,
 #               no in-loop barriers, KT=16 residency sweep 64/32/16/8)
+#               -> 5500 (QT 8->16 + loop-bottom LDS race barrier, 2026-10-10:
+#               4937-5263 us over 6 runs at unchanged 1.38e-04 oracle error;
+#               the barrier alone is perf-neutral at QT=8. Pin is max+10%
+#               headroom over the worst seen warm run, not the best.)
 #   attn_c16 DECODE_US   292.4 -> 195 (shuffle reduce + KTD=32)
 gfx1201  gemm_tiled  BEST_PCT    min  21.4  s/.*BEST:[[:space:]]+M=1024[[:space:]]+at[[:space:]]+([0-9.]+)%.*/\1/p
-gfx1201  attn_c16    PREFILL_US  max  9650  s/.*prefill[[:space:]]+2048x8[[:space:]]+GQA4[[:space:]]+([0-9.]+).*/\1/p
+gfx1201  attn_c16    PREFILL_US  max  5500  s/.*prefill[[:space:]]+2048x8[[:space:]]+GQA4[[:space:]]+([0-9.]+).*/\1/p
 gfx1201  attn_c16    DECODE_US   max  200   s/.*decode[[:space:]]+step[[:space:]]+x8x8[[:space:]]+([0-9.]+).*/\1/p
