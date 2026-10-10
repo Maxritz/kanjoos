@@ -1586,3 +1586,305 @@ committed): `tmp/macx_gfx1031_bench.sh` (+ `D:\knj-scratch\mbench.sh` copy),
 `baselines.txt` pins not yet cut (first measured numbers above are the inputs);
 `run_bench.sh` still hardcodes `/g/…` paths (MACX script stays scratch until a
 path-configurable runner is designed); TowardsDataScience URL never provided.
+  CLOSED 2026-10-11 (Phase 63): the "TowardsDataScience article" never existed
+  as one. The cited source is the GitHub repo JohnTDI-cpu/rdna4-wmma-guide
+  ("Practical Guide: gfx12 (RDNA4) WMMA Output Lane Mapping", author Mateusz,
+  repo activity from 2026-03-08), which docs/REFERENCE-SPEEDS.md already linked
+  correctly; the Phase 58 summary text "JohnTDI-cpu/rdna4-wmma-guide, fetched
+  raw" was a repo fetch, not a Medium fetch. Web re-check (Medium @JohnTDI-cpu
+  → 403, Freedium probe unresolvable) found no TDS/Medium canonical URL, so one
+  cannot be provided — the citation stands on the repo, which is deliberate
+  honesty, not an omission.
+
+### Phase 60 — IQ1_M numpy decoder for the qwen35 oracle; Saluki file identified as Qwen3.8-27B+MTP  ·  DONE
+
+**Believed at the time**   The Saluki GGUF might be a DFlash drafter, and the
+oracle's `token_embd.weight uses unsupported type IQ1_M` refusal (Phase 59) was
+an engine gap.
+**Decision**   Neither: the file is a qwen35 *target* with a merged MTP head
+(`general.architecture='qwen35'`, `nextn_predict_layers=1`, blk.64 `nextn.*`),
+and the gap was oracle-only — the engine already decodes IQ1_M
+(`ggml_type_is_dequantizable` true + `dequant_iq1_m`). Added the missing numpy
+decoder to `tools/ref_qwen35.py` (codebook blob copied byte-for-byte from
+gguf-py's `IQ1_S.grid_hex`; arithmetic the oracle's own port of the `block_iq1_m`
+layout), because a reference that cannot read the embeddings cannot verify any
+layer. Chose / rejected / falsified by: the card
+(`Kujira/Underdog-Saluki-27B-1.0-MTP-Abliterated-GGUF`) confirms Qwen3.8-27B
+base + `--spec-type draft-mtp` usage + only 4 tensors in blks 35-36 changed vs
+the MTP release; the file's own metadata (sampling top_k 20 / top_p 0.95 /
+temp 1.0) matches the card's recommended sampler.
+**Changed**   `tools/ref_qwen35.py` only — `BLOCKS[29]=(56,256)`, the embedded
+`_IQ1S_GRID_HEX` blob + `_iq1s_grid()` builder, and the `tt == 29` branch.
+Scratch: `tmp/gen_iq1m_patch.py` (the blob injector). No engine file touched.
+**Verified**
+- `$ python tools/ref_qwen35.py <Saluki> --layer 0 --tokens 760,6511,314,9338,369`
+  → `oracle: dequant IQ1_M token_embd.weight identical` (max abs diff 0.0 vs
+gguf-py on the first 8 blocks — the honesty gate), then the *next* honest
+refusal: `tensor blk.0.attn_qkv.weight uses unsupported type IQ3_S`, RC=1.
+Layer-0 needs IQ1_M (now) + IQ3_S (qkv, gate) + IQ4_XS (ssm_out); the last two
+are still oracle-undecodable, so no Saluki vector is verified yet.
+- Regression: same command on `ThinkingCap-Qwen3.8-27B-Q4_K_M.gguf` → RC=0,
+20/20 vectors as the checked-in `records/qwen35-probe-2026-10-08/layer0`
+manifest, all six crosschecks identical. The diff is purely additive.
+- Drive-by: numpy 2.5.3 rejects `.view("<f2>")` (measured); the new branch
+spells `np.float16`. The pre-existing F16/BF16 branches keep the old spelling
+(they never execute on the files probed here) — noted, not fixed.
+**Measurements**           | quantity | value | provenance |
+|---|---|---|---|
+| IQ1_M oracle-vs-gguf-py max abs diff | 0.0 (identical) | MEASURED (crosscheck, Saluki token_embd) |
+| Saluki layer-0 oracle run | RC=1, stops at IQ3_S attn_qkv | MEASURED |
+| ThinkingCap layer-0 regen | RC=0, 20/20 vectors | MEASURED |
+**Still open**   IQ3_S (+ IQ4_XS) oracle decoders before any Saluki vector
+verifies; qwen35 trunk forward path + DFlash loader (C20) before any qwen35
+file or drafter runs; the `no decoder` comments in `src/loader/gguf.cpp`
+and `src/model/qwen35.cpp` are now stale for the engine (still true of the
+oracle for IQ3_S/IQ4_XS and co.).
+
+### Phase 61 — the open-items batch closed: pre-rule sweep, mutant, long-doc, IQ3_S/IQ4_XS, KV prior art  ·  DONE
+
+**Believed at the time**   MISSING-ITEMS §7 listed the tokenizer/tooling/doc
+items as open; Phase 60 stopped the Saluki probe at `unsupported type IQ3_S`;
+the user supplied a five-paper KV reading list; a reminder pinned "we need per
+op perf tracing" as a standing requirement.
+**Decision**   Close every small item first and leave only the two structural
+ones (qwen35 trunk, C20 loader). Chose / rejected / falsified by: the pre-rule
+sweep derives its expectations from llama.cpp's ACTUAL regex strings (parsed
+from `src/llama-vocab.cpp`, never retyped) instead of prose; the long-doc run
+exposed a real bug (`UnboundLocalError` in tok_crosscheck's cap branch — the
+engine truncation notice printed before llama ids existed), fixed at the
+cause; the mutant used a differential against the current tree because no
+llama-tokenize exists on this machine, with the transitive argument recorded.
+**Changed**
+- `tools/ref_qwen35.py` — IQ3_S (tt 21) + IQ4_XS (tt 23) numpy decoders,
+  IQ3_S grid blob byte-for-byte from gguf-py, kvalues inline; scratch
+  `tmp/gen_iq3s_iq4xs_patch.py`. (Corrects Phase 60's "still open".)
+- `tools/tok_pre_sweep.py` (new), `tests/unit/test_tok_pre_sweep.cpp` (new,
+  42 rows), `tests/unit/CMakeLists.txt` (+`tok_pre_sweep`, +`tok_fixtures`),
+  `src/tokenizer/tokenizer.h` (`pretokenize` made public for the gate).
+- `tools/tok_crosscheck.py` — cap branch restructured; tokens counted once.
+- `tools/bench/run_bench.sh` — `KNJ_ROCM_GFX1201/1031`, `KNJ_ROCM_FALLBACK_LIB`,
+  `KNJ_HIPCC_CANDIDATES` env overrides (defaults unchanged).
+- `tools/bench/baselines.txt` — first gfx1031 pins (reason: Phase 59).
+- `docs/11-kv-prior-art.md` (new) — five papers assessed vs docs/09.
+- `docs/MISSING-ITEMS.md`, `docs/10` §7 — §7.4 corrections appended as closures.
+- `src/loader/gguf.cpp`, `src/model/qwen35.cpp` — stale no-decoder comments.
+- `records/` — tok-pre-sweep, tok-mutant-fuzz200, tok-longdoc-2048 logs.
+**Verified**
+- `$ ctest --test-dir build/cmake-host` → exit 0, **9/9 pass** (tok_fuzz_campaign
+  SKIPPED with reason) — after all source edits.
+- `$ python tools/tok_pre_sweep.py` → exit 0, 42 splits; `ctest -R tok_pre_sweep`
+  → Passed, 42 rows 0 failures (first run).
+- Long doc (103,025 B, one line, 32,112 ids): cap notice prints all three full
+  lengths, verdict **PASS** on the first 2048, RC=0 (`records/tok-longdoc-2048-2026-10-10.log`).
+- Mutant vs current, 200 fuzz prompts: 200/200 identical, RC=0
+  (`records/tok-mutant-fuzz200-2026-10-10.log`).
+- Saluki oracle: all 6 crosschecks identical (IQ1_M/IQ3_S/IQ4_XS new) RC=0;
+  engine probe `--qwen35-ref` → **20/20 element-by-element, 0 failed**,
+  embeds/xnorm 0.000e+00, qkv/gate ≤1.144e-05 (probe RC=3 = designed refusal).
+- ThinkingCap oracle regression: RC=0, 20/20 vectors (patch purely additive).
+- Per-op profile (`--profiling`, qwen3moe): component table matches the
+  contract shape, floor 0.080 us host/dev, clock-domain and NOT-MEASURED rows
+  printed honestly; `KNJ_PROFILE_OP` per-op markers confirmed on the qwen3moe
+  path (coarse on qwen35 → acquires per-op rows with the trunk).
+- Fuzz campaign on MACX: `summary.txt` → seed1 complete, rc=0, 5031 ok,
+  0 boundary, **VERDICT: PASS**.
+**Measurements**           | quantity | value | provenance |
+|---|---|---|
+| Saluki layer-0 vectors | 20/20, max abs ≤1.144e-05 | MEASURED (probe vs oracle) |
+| pre-rule sweep rows | 42, 0 failures | MEASURED (ctest tok_pre_sweep) |
+| long-doc ids compared | 32,112 tokenized, 2,048 compared | MEASURED |
+| tok_fixtures --check | exit 0, all fixtures match | MEASURED |
+**Still open**   the two structural items: the qwen35 trunk forward path +
+sampler (with per-op profiling rows for its ops, per the standing requirement)
+and the C20 DFlash/DFlash2/DSpark loader; gfx1031 pins await a real MACX
+tier-C run against them (values are Phase-59 measurements, cut but unenforced
+until run_bench executes there with the env overrides).
+
+### Phase 62 — the fuzz "still-open" was complete on MACX; campaign harness had a one-series defect; fixed at the cause  ·  DONE
+
+**Believed at the time**   Phase 61's still-open said "only seed 1 completed;
+seeds 2-3 never ran" and MISSING-ITEMS 7.1 said a 5000-prompt pass takes ~3 h.
+**Decision**   Verify instead of re-running: `schtasks` on MACX shows
+`KnjFuzzFull` ran 10-10 18:05, Last Result 1 (clean exit), and
+`C:\x\fuzz_campaign.log` ends `total: 15000 completed prompts, 0 boundary,
+VERDICT: PASS, FUZZ_EXIT=0`. The artifacts had simply never crossed the drive
+boundary. But verifying honestly exposed a REAL harness defect: the campaign
+header carries `fuzz_seed=1` in all three seed blocks, and the seed2/seed3 logs
+are byte-identical after masking the seed label (diff exit 0). All three seeds
+drove the cross-check with the SAME `--fuzz-seed 1`, so the "15093 identical"
+was one 5032-string series compared three times, not three independent series.
+Cause: `tok_fuzz_campaign.py` built one `cmd` per seed but passed the same
+`fuzz_seed` to every invocation.
+**Changed**   `tools/tok_fuzz_campaign.py` — per-seed fuzz seeds: seed s runs
+`--fuzz-seed fuzz_seed + (s-1)` when `--fuzz-seed` was not given explicitly; an
+explicit `--fuzz-seed` still reproduces the old (one-series-x-N) behaviour, and
+the summary line records which happened (`fuzz_seed=1, 2, 3 (one per seed)` vs
+`fuzz_seed=1 (explicit; every seed reused it)`). `--fuzz-seed --help` text
+updated to say the base-seeds-first-seed rule. Scratch: `tmp/smoke_fuzz_seed_patch.py`.
+**Verified**
+- `$ python tmp/smoke_fuzz_seed_patch.py` -> RC=0: derivation 3 seeds -> (1,2,3)
+  default / (1,1,1) explicit; summary-line shape verified; per_seed_from_log
+  unchanged (parses the real seed-1 summary as ok=5031, rc 0).
+- `$ python tools/tok_fuzz_campaign.py --help` -> exit 0, help states the rule.
+- `python -c ast.parse` clean; seed2/3/summary logs for the completed MACX
+  campaign copied into records/tok-fuzz-5000/ (campaign-run.log, seed2-5000.log,
+  seed3-5000.log, sha256 3aefa48f845ddad3 / 255f893ec9f8f2ce / fdf8e472aff28cdf).
+**Changed** (artifacts, not code)   `records/tok-fuzz-5000/`: campaign-run.log
+(the real MACX `fuzz_campaign.log`), seed2-5000.log, seed3-5000.log.
+**Measurements**           | quantity | value | provenance |
+|---|---|---|
+| MACX campaign verdict, 3 seeds x 5000 | PASS, 0 merge-boundary, FUZZ_EXIT=0 | MEASURED (C:\x\fuzz_campaign.log, ssh) |
+| seed2 vs seed3 log identity (masked) | byte-identical, diff exit 0 | MEASURED — one prompt series, not three, in the pre-fix runs |
+| harness smoke (post-fix) | derivation + summary + parser, RC=0 | MEASURED tmp/smoke_fuzz_seed_patch.py |
+**Still open**   A REAL 3-series campaign must be re-run on MACX with the fixed
+harness (the pre-fix PASS was honest 0-boundary-but-one-series; it did not test
+the tokenizer three independent ways). Everything else from Phase 61 stands:
+qwen35 trunk + sampler, C20 loader, one enforced gfx1031 run_bench pass.
+
+
+### Phase 63 — the remaining non-structural items: campaign relaunched on the fixed harness, gfx1031 tier B+C run, disposition + citation closed  ·  PARTIAL
+
+**Believed at the time**   Phase 62's still-open list: a real 3-series fuzz
+campaign (the stored PASS predates the fix), one enforced gfx1031
+run_bench pass, `dflash.selector_top_k` disposition, the Phase 58 article URL.
+**Decision**   Drive everything that can run unattended on MACX via S4U
+scheduled tasks (the `Interactive only` LogonType of the Phase 50 task is why
+`schtasks /Run` returned 267011 and fired nothing — measured; S4U
+`New-ScheduledTaskPrincipal -LogonType S4U` fires without a logged-in session),
+and close the two doc items with dispositions. A synced-harness 2-prompt probe
+on MACX (rc 0, PASS) preceded the 3-hour launch.
+**Changed**   (code) none — the harness fix is Phase 62's.
+(remote) `tools/tok_fuzz_campaign.py`, `tools/tok_crosscheck.py`,
+`tools/bench/run_bench.sh`, `tools/bench/baselines.txt`,
+`tmp/macx_gfx1031_bench.sh` synced to `D:\kanjoos`.
+(local) `records/gfx1031-tierC-2026-10-11.log` (11909 B, pulled verbatim).
+**Verified**
+- `$ ssh … macx tierB` → preflight healthy, census PASS: attn_c16/expert_gemm/
+  gemm_tiled/gemm_w4/trace_components OK; gemm_w4 KNJ_EXPECTs PRESENT
+  (`v_dot4_i32_i8` x2, `v_dot8_i32_i4` x1); gemm_wmma/wmma_* `_gfx12` target
+  feature refusals; q4k_*/rocwmma_* static-assert refusals; knj_xfer_probe
+  EMPTY. `MACX tierB gfx1031: PASS`.
+- S4U task `KnjTierC` → `LastTaskResult 0` after run; log tail:
+  `MACX tierC gfx1031: PASS`, **`TIERC_EXIT=0`**. Five drivers ran and passed:
+  attn_c16 prefill 8920.2 us / decode 215.0 us (oracle relRMSE ≤1.97e-04),
+  expert_gemm 24576/24576 vs double oracle (0 exactly-zero), gemm_tiled BEST
+  M=1024 at 16.0% (4.0/24.8 TFLOP/s), trace_components 0 mismatches,
+  knj_xfer_probe PASS; nine WMMA drivers SKIPPED (correct refusal). Full log:
+  `records/gfx1031-tierC-2026-10-11.log`.
+- **Measured vs the Phase-59 pins:** gemm_tiled 16.0 vs pin 16.4 (min dir,
+  −2.4%, inside 10%); attn_c16 prefill 8920 vs pin 9800 max (inside, 10.7%
+  headroom); attn_c16 decode 215.0 vs pin 245 max (inside). All three pins
+  would PASS the real checker — **but the pins were NOT formally enforced**:
+  the scratch `mbench.sh` mirrors run_bench.sh's census/guard/exit logic but
+  has no `check_baseline` (grep confirms 0 matches). The pins move from
+  "cut" to "measured-against, passing", and formal enforcement needs either
+  baseline checking wired into the MACX scratch runner or a
+  path-configurable `run_bench.sh` (its `/g/...` defaults are the blocker
+  Phase 59 already recorded). Reported as an honest partial, not a pass.
+- S4U task `KnjFuzz3Seed` fired 00:44:01 (`LastTaskResult 267009` =
+  running); seed-1 header live in `D:\kanjoos\records\tok-fuzz-5000\seed1-
+  5000.log`: `fuzz_seed=1 per_seed=5000`. The assembled cmd lines were
+  verified on the real `main()` (local e2e, Phase 62) to be `--fuzz-seed
+  1/2/3`; on MACX the same synced file (sha 56B5623FE4CEF7C3 == local) is
+  running. Verdict NOT yet read — the run needs ~3 h.
+- `dflash.selector_top_k`: disposition recorded in docs/10 §8 — declared-not-
+  used; the loader reads it as metadata only (DFlash bootstrap, §3, carries
+  NO selector tensors, so no loader arithmetic may assume it); its consumer is
+  the C20 drafter's token-selection path. MISSING-ITEMS §7.5 closed.
+- Phase 58 citation: the researcher-web pass found **no TDS/Medium article
+  exists** (Medium @JohnTDI-cpu → 403, Freedium unresolvable); the verified
+  source is the GitHub repo `JohnTDI-cpu/rdna4-wmma-guide` ("Practical Guide:
+  gfx12 (RDNA4) WMMA Output Lane Mapping", author Mateusz, repo activity
+  2026-03-08), which `docs/REFERENCE-SPEEDS.md` already links correctly.
+  Phase 58 still-open line annotated CLOSED in place.
+**Measurements**           | quantity | value | provenance |
+|---|---|---|---|
+| gfx1031 tier B (16 drivers) | PASS, 5 OK, 9 correct refusals, 1 EMPTY | MEASURED, ssh run_tierb.sh |
+| gfx1031 tier C (5 drivers) | PASS, exit 0 | MEASURED, KnjTierC |
+| attn_c16 gfx1031 this run | prefill 8920.2 us, decode 215.0 us | MEASURED |
+| gemm_tiled gfx1031 M=1024 | 16.0% of 24.8 TFLOP/s derived peak | MEASURED |
+| Pins vs run | 16.4 min / 9800 max / 245 max — all inside 10% | DERIVED from the log + baselines.txt |
+| Campaign state at entry close | running (267009), seed1 header live | MEASURED |
+**Still open**   3-series campaign verdict (~3 h out; next session reads
+`C:\x` → no: `D:\kanjoos\records\tok-fuzz-5000\summary.txt` + per-seed fuzz_seed
+headers); formal baseline enforcement on MACX (wire check_baseline into
+mbench.sh or make run_bench.sh paths configurable — the Phase 59 still-open);
+the two structural items (qwen35 trunk + sampler; C20 loader) unchanged.
+
+
+### Phase 63a — gfx1031 pins formally enforced (the Phase 63 honest partial closes)  ·  DONE
+
+**Believed at the time**   Phase 63 recorded the pins as "measured-against,
+passing" but NOT enforced, because the scratch `mbench.sh` had no
+`check_baseline`.
+**Decision**   Wire the checker verbatim (same format, 10% tolerance,
+NOT-FOUND-is-regression, arch-scoped judging, compared only after a driver
+exits 0, exit 6 on regression) into the scratch runner and rerun tier C.
+First rerun (KnjTierC2, rc 0) produced NO baseline lines — the call site
+replacement had silently failed; the function was defined, never invoked.
+Fixed the call site (grep-verified `check_baseline` at def:184 call:263),
+re-ran (KnjTierC3, rc 0).
+**Changed**   `tmp/macx_gfx1031_bench.sh` — BASELINE_FILE + check_baseline
+(verbatim logic from run_bench.sh), call site after each tier-C driver's
+exit-0 branch, exit-6 path before rc 0 fallthrough; removed the dead
+duplicated tail after `exit 0` (an add-order slip from an earlier edit).
+**Verified**
+- `$ bash -n tmp/macx_gfx1031_bench.sh` → 0.
+- KnjTierC2 → rc 0 but `grep -c baseline == 0` → caught, cause fixed, not
+  explained away.
+- KnjTierC3 → rc 0 AND three judged lines, **0 REGRESSION, 0 NOT FOUND**:
+  `attn_c16 PREFILL_US pinned max 9800 got 8926.6`; `attn_c16 DECODE_US
+  pinned max 245 got 216.0`; `gemm_tiled BEST_PCT pinned min 16.4 got 16.4`.
+  `MACX tierC gfx1031: PASS`, `TIERC_EXIT=0`.
+- Log pulled verbatim: `records/gfx1031-tierC-enforced-2026-10-11.log`
+  (sha093cead6ce016ab5).
+**Measurements**           | quantity | value | provenance |
+|---|---|---|---|
+| gfx1031 pins formally enforced | 3/3 judged, 3/3 inside tolerance, exit 0 | MEASURED, KnjTierC3 |
+| attn_c16 this run | prefill 8926.6 us, decode 216.0 us | MEASURED |
+| gemm_tiled M=1024 | 16.4% (the run-to-run spread is itself the reason the pin is min-dir: 16.0 → 16.4 → 17.1 across three runs) | MEASURED |
+**Still open**   campaign verdict; the two structural items.
+
+
+### Phase 64 — five remaining qwen35 oracle decoders (Q2_K/IQ2_XXS/IQ2_XS/IQ2_S/IQ3_XXS); Saluki layer-0 fully verified  ·  DONE
+
+**Believed at the time**   Saluki (`Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp.gguf`) still
+had oracle-undecodable tensors (Phase 61: IQ3_XXS 78, IQ2_S 17, Q2_K 13,
+IQ2_XS 9, IQ2_XXS 5), so no Saluki vector past layer-0 input projections was
+verifiable and the file could not run.
+**Decision**   Port all five from the installed gguf-py (`quants.py` classes
+Q2_K/IQ2_XXS/IQ2_XS/IQ2_S/IQ3_XXS, block sizes confirmed via class attrs:
+84/66/74/82/98 bytes), grid blobs byte-for-byte, builders mirroring
+`init_grid`, branches mirroring `dequantize_blocks` shape-for-shape. The
+port's own `crosscheck()` against gguf-py on real tensor bytes is the gate,
+then the engine probe element-by-element, then the ThinkingCap regression
+proves the patch purely additive.
+**Changed**   `tools/ref_qwen35.py` only — builders `_iq2_grid` (+`_iq2_xxs/
+xs/s_grid`), `_iq3_xxs_grid`, `_iq2_ksigns`; BLOCKS entries tt 10/16/17/18/22;
+five `dequant_blocks` branches. Scratch: `tmp/gen_iq2_iq3xxs_q2k_patch.py`
+(the injector), `tmp/iq_blobs.json` (blob transport), `tmp/fix_double_hex.py`.
+**Verified**   (each failure below was fixed at the cause, then rerun)
+- `$ python tools/ref_qwen35.py <Saluki> --layer 0 --tokens 760,6511,314,9338,369`
+  → exit 0, **11/11 crosschecks identical** (F32/Q8_0/Q2_K/Q4_K +
+  IQ1_M/IQ2_XXS/IQ2_XS/IQ2_S/IQ3_XXS/IQ3_S/IQ4_XS), 20 vectors written.
+- Engine probe `--qwen35-ref C:/tmp/saluki_ref_new` → **20/20
+  element-by-element, 0 failed** (embeds/xnorm 0.0, qkv ≤1.53e-05);
+  probe exit 3 = the designed trunk refusal, unchanged.
+- ThinkingCap regression → exit 0, 20 vectors (F32/Q4_0/Q8_0/Q4_K/Q5_K/Q6_K
+  untouched — patch purely additive).
+- Local `ctest` → 8 pass / 1 skipped-by-design (9 tests), exit 0.
+- Three port bugs caught by the gates, all fixed at the cause: (1) `.encode()`
+  on a bytes blob (implicit-concat pattern, same as the file's own blobs);
+  (2) double-hexlified grid transport (gguf-py's grid_hex is ASCII text —
+  fixed via `tmp/fix_double_hex.py`, JSON + oracle); (3) 2-D vs gguf-py's
+  (1,1,N,M) grid shape for `take_along_axis`; (4) IQ3_XXS scales slice
+  `66:82` → `66:98` (98-byte block, 32 scale bytes).
+**Measurements**           | quantity | value | provenance |
+|---|---|---|---|
+| new-decoder crosschecks | 5/5 identical vs gguf-py, max abs diff 0.0 | MEASURED |
+| Saluki layer-0 engine probe | 20/20, max abs ≤1.53e-05 | MEASURED |
+| ThinkingCap regression | exit 0, 20 vectors | MEASURED |
+**Still open**   the qwen35 trunk forward path + sampler (with per-op
+profiling rows) and the C20 DFlash/DFlash2/DSpark loader — unchanged. The
+3-series campaign re-run is still in flight on MACX (267009).
+

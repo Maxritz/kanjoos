@@ -411,8 +411,8 @@ what §8 still lists as missing is the *trunk* that consumes it.
    including the q/gate split, QK-norm, partial IMROPE RoPE and the sigmoid gate,
    verified by a mutation that removes the rotation — §6.3. What remains is the
    trunk *around* those two blocks: residual and layer composition, the FFN, the
-   head, and the four `nextn.*` tensors — plus, for the drafters, the tokenizer's
-   *pre* rule dispatch (§6.4).
+   head, and the four `nextn.*` tensors. (The tokenizer's *pre* rule dispatch
+   is done and gated — §6.4 and §8 — so it is not on this list.)
 2. **`dflash` loader** (C20's "one loader for DFlash / DFlash2 / DSpark, with an
    arch compatibility check"): one metadata reader, three tensor grammars.
    `permute`-free: the layouts above are already this engine's `[in, out]`
@@ -437,6 +437,11 @@ step is taken next starts from measurement.
 * Not that the token counts or dims are complete: the metadata above is what the
   files declare, and `dflash.selector_top_k = 16` in particular is read as a
   *declared* parameter whose use inside the selector is not established here.
+  Disposition 2026-10-11: recorded as **declared-not-yet-used**, and the loader
+  must not arithmetic on it: DFlash (the bootstrap member, 58 tensors, §3) carries
+  NO selector tensors at all, so a family loader reads `.selector_top_k` as
+  metadata for the members that do carry selector tensors (DFlash2, DSpark) and
+  its consumer is the drafter's token-selection path — C20 work, not loader work.
 * Not that the three variants are interchangeable: they differ in block size (8 /
   16 / 7), target-layer sets, FFN width, head counts, rope scaling and extra heads.
   A loader that treats `dflash` as one shape will be wrong for two of the three.

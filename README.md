@@ -14,10 +14,12 @@ Reference model: **Qwen3-30B-A3B** (`models/qwen3-30b-a3b/config.json`) —
 heads × head_dim 128, vocab 151936, bf16.
 
 **Targets:** **RDNA4 `gfx1201` is the primary target** — and, on this machine,
-the only one that can execute. RDNA2 `gfx1031` is a *declared* second target and
-**future work**: it is compiled and censused, never the default, and no current
-result is gated on it. Both are planned for **Windows 11** and **Linux**, with
-ROCm 10.1.
+the only one that can execute. RDNA2 `gfx1031` (RX 6700 XT, second machine) is
+a *declared* second target: tier-B census PASS, tier-C runs guarded and passing,
+and three throughput pins formally judged inside tolerance
+(`records/gfx1031-tierC-enforced-2026-10-11.log`) — never the default, and
+rocWMMA/gfx12 drivers correctly refuse it (no WMMA on RDNA2). Both are planned
+for **Windows 11** and **Linux**, with ROCm 10.1.
 **VRAM profiles:** 6 / 8 / 12 / 16 GiB. **RAM profiles:** 16 / 24 / 32 / 48 /
 64 / 96 GiB.
 
@@ -110,15 +112,27 @@ list with reasoning is [docs/MISSING-ITEMS.md](docs/MISSING-ITEMS.md) §4.)
 
 | area | state | evidence |
 |---|---|---|
-| Host runtime (`knj_runtime` + `kanjoos-run`) | builds; loader, BPE tokenizer, qwen3moe forward pass, qwen35 front end, profiler, platform layer | `ctest` 6 pass / 1 skipped-by-design |
+| Host runtime (`knj_runtime` + `kanjoos-run`) | builds; loader, BPE tokenizer, qwen3moe forward pass, qwen35 front end, profiler, platform layer | `ctest` 8 pass / 1 skipped-by-design (9 tests), exit 0 |
 | GGUF decoders, 26 types | bit-exact vs references | `tools/dequant_validate.py` (20/20) + `tools/rocmfp_validate.py` (36/36), both exit 0 |
-| Tokenizer parity vs llama.cpp | 5031/5031 identical, 0 merge-boundary divergences, 36555 tokens | `records/tok-fuzz-5000/summary.txt` |
+| qwen35 oracle decoders | 11 types cross-checked identical vs gguf-py on Saluki tensor bytes (F32/Q8_0/Q2_K/Q4_K + IQ1_M/IQ2_XXS/IQ2_XS/IQ2_S/IQ3_XXS/IQ3_S/IQ4_XS) | `python tools/ref_qwen35.py <Saluki> --layer 0` → 11/11 identical, exit 0; ThinkingCap regression (F32/Q4_0/Q8_0/Q4_K/Q5_K/Q6_K) RC=0, 20 vectors |
+| qwen35 layer-0 probe vs oracle | 20/20 vectors element-by-element, 0 failed (embeds/xnorm bit-exact, qkv ≤1.53e-05) | `kanjoos-run --qwen35-ref C:/tmp/saluki_ref_new`, probe exit 3 = designed trunk refusal |
+| Tokenizer parity vs llama.cpp | 5031/5031 identical, 0 merge-boundary divergences, 36555 tokens per seed | `records/tok-fuzz-5000/summary.txt` (see note on the 3-seed run) |
 | Tokenizer build time | ~52 ms `unordered_map` → ~9 ms open-addressing `TokViewMap`, identical ids | `tmp/bench_tokmap.cpp` + fuzz gate |
 | Attention prefill (gfx1201) | 9.6 ms → 5.0 ms via QT 8→16 + loop-bottom LDS-race barrier, oracle error 1.38e-04 unchanged | `tools/bench/attn_c16.hip`, pin `PREFILL_US 5500` |
 | Bench gate | `run_bench.sh` exit 0 (tier A host, tier B compile census, tier C guarded runs) | `tools/bench/baselines.txt` |
-| gfx1031 | compile-only (`-S` emit rc=0); tier-C execution DECLINED, no device | explicit, never a silent pass |
+| gfx1031 tier B + tier C (MACX, RX 6700 XT) | census PASS (5 OK, 9 correct rocWMMA refusals); 5 drivers ran and passed; **3/3 pins formally judged and inside tolerance** | `records/gfx1031-tierC-enforced-2026-10-11.log`, `KnjTierC3` exit 0 |
 | c21 profiler gate | 30/30 after fixing a Windows early-sleep flake at the stimulus (assertion untouched) | `tests/unit/test_c21_profiler.cpp` GATE 1 |
 | Full MoE inference | PLAN — the engine serves, prefills, and profiles; end-to-end generation against the oracle is the open milestone | [docs/08-roadmap.md](docs/08-roadmap.md) P0–P7 |
+
+> **Note on the 3-seed fuzz run (2026-10-11, honest accounting).** The first
+> 15,000-prompt campaign (3 seeds × 5000) returned VERDICT: PASS with 0
+> merge-boundary divergences, but all three seeds drove the cross-check with
+> the *same* `--fuzz-seed 1` — the three logs are byte-identical, so its true
+> coverage was one 5032-string series, not three. The harness defect was fixed
+> at the cause (`tools/tok_fuzz_campaign.py` now derives a per-seed fuzz seed;
+> the summary line records which mode ran), and a true 3-series re-run is in
+> flight on MACX. The PASS stands for what was compared; it did not test the
+> tokenizer three independent ways. See `docs/CODING-LOG.PENDING.md` Phase 62.
 
 ---
 

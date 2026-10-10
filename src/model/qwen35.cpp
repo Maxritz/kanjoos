@@ -7,9 +7,11 @@
 //     metadata or from a tensor's declared shape, and a missing key is a refusal
 //     with the key named -- not a default that happens to be about the right size.
 //  2. A tensor is bound only if it is *both* present with the implied shape and
-//     decodable by this engine. The 12 GB `-mtp` file on this machine carries six
-//     IQ types no decoder here implements; that has to come out as "IQ2_S, 130
-//     tensors" and not as a crash or a silent skip.
+//     decodable by this engine. Every quantisation in the files on this machine
+//     currently decodes (tools/dequant_validate.py, 21/21 bit-exact vs gguf-py,
+//     2026-10-10); should a future file carry a type with no decoder, that has
+//     to come out as a named refusal ("IQ2_S, N tensors") and not as a crash
+//     or a silent skip.
 #include "src/model/qwen35.h"
 
 #include <algorithm>

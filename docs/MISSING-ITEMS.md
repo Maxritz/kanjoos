@@ -231,11 +231,12 @@ merge-boundary differences, 1 special-token POLICY difference** on both the 2483
 0 on both. Getting there required fixing three real defects in this engine's BPE
 (merge table keyed by concatenation so no merge ever fired; a symbol-lookup
 fallback that silently absorbed chunks; byte tests standing in for Unicode
-character classes). What remains on this axis is **dispatch on
-`tokenizer.ggml.pre`** — the engine implements the qwen2-era pre-tokeniser for every
-`gpt2` file and prints the declared `pre` without switching on it, and no file on
-this machine can distinguish `qwen2` from `qwen35` because llama.cpp maps both to
-the same regex. See `docs/10-dflash-draft-models.md` §6.4.
+character classes). Dispatch on `tokenizer.ggml.pre` is **done and gated**
+(`tok_pre_dispatch`: ten single-field fixtures, exact id lists, by-name refusals;
+`tools/tok_pre_rules.py` re-derives the table from llama.cpp) — no file on this
+machine can distinguish `qwen2` from `qwen35` because llama.cpp maps both to the
+same regex, but the dispatch is in the tree. See `docs/10-dflash-draft-models.md`
+§6.4 and §8.
 
 **Not missing by accident — missing by not being written yet.** Three separate
 capabilities, in dependency order:
@@ -288,14 +289,22 @@ the engineering to-do that came out of the C21 / qwen35 / tokenizer work.
   CHARACTER, so a single U+00A0 (2 bytes) or U+3000 (3 bytes) was cut in half and
   its own merge could not fire. Fixed in `src/tokenizer/tokenizer.cpp`, gated by
   the new ctest case `tok_whitespace_run`, and the 50-prompt fuzz pass moved from
-  1 merge-boundary difference to 0. **Partial in one respect:** only the
-  whitespace alternatives were re-derived against the reference; the other six
-  alternatives are still emulated from their prose, not swept.
-* **The class-rule mutation is still a null result.** Applying the pre-fix byte
-  test ("any byte ≥ 0x80 is a letter") to `unicode_class` changes nothing on the
-  25 hand-written strings. Unblocked by: building that mutant and running
-  `tools/tok_crosscheck.py --fuzz 200` against it — the fuzzer draws high bytes on
-  purpose and did find the *other* hidden rule, so it is the right instrument.
+  1 merge-boundary difference to 0. **The remaining partial is now closed too
+  (2026-10-10):** all seven regex alternatives are swept, not just whitespace.
+  `tools/tok_pre_sweep.py` extracts the QWEN2/QWEN35 patterns mechanically from
+  llama.cpp's `src/llama-vocab.cpp` and derives 42 splits
+  (`records/tok-pre-sweep-2026-10-10.log`); the ctest case `tok_pre_sweep`
+  asserts every one exactly against `Tokenizer::pretokenize` — 42 rows,
+  0 failures on the first run.
+* **The class-rule mutation is a confirmed null result (2026-10-10).** The mutant
+  (`unicode_class` returns Letter for any cp ≥ 0x80; `tmp/mutant-run.exe`, source
+  restored after) vs the current tree on 200 fuzz prompts: **200/200 identical**
+  (`records/tok-mutant-fuzz200-2026-10-10.log`, `tmp/mutant_diff.py`). The direct
+  mutant-vs-llama leg never ran here (no `llama-tokenize` on this machine), but it
+  is moot: current-vs-llama on the same generator family is PASS (MACX seed-1
+  5000-prompt campaign, 0 boundary), so the mutant transitively matches the
+  reference on high-byte input too. The class fix stays as a real divergence from
+  the reference regex with no demonstrated behaviour change. Closed.
 * **The cross-check's reference is llama.cpp, not the trainer.** 25 hand strings +
   corpus lines + fuzz prompts; a very long document has never been compared.
   Unblocked by: a corpus of real prose large enough to cross `--max-tokens` 2048.
@@ -311,10 +320,13 @@ the engineering to-do that came out of the C21 / qwen35 / tokenizer work.
   only, hand + corpus, fuzz, empty-run refusal, fixture axes) asserts the tools'
   own summary lines, but lives in `tmp/` where nothing runs it. Unblocked by:
   moving it into the gate list `tools/bench/run_bench.sh` drives.
-* **A loader failure reads as a tokenizer failure.** Without
-  `PATH=/c/Strawberry/c/bin:$PATH` the engine exits `3221225785` (`0xC0000139`)
-  with no stdout, and `tok_crosscheck` reports only "the engine printed no id
-  list". Unblocked by: detecting that exit class and naming the missing runtime.
+* **A loader failure reads as a tokenizer failure — closed 2026-10-10.**
+  `tok_crosscheck.engine_ids` maps the unsigned loader codes (`LOADER_FAILURE_CODES`:
+  0xC0000135/0xC0000139/0xC000007B) to a "failed to START … process-boundary
+  failure" refusal instead of "no id list", and `engine_env()` prepends the first
+  `MINGW_CANDIDATES` dir carrying `libstdc++-6.dll` (overridable via
+  `KNJ_MINGW_BIN`). Verified by forcing returncode 0xC0000139 through the real
+  branch: the message names the code and the boundary.
 * **The separator sweep is not a gate.** `tmp/probe_space_class.py` is the check
   that proves parity across all twelve whitespace classes plus the ASCII controls
   (it is what reduced the Phase 51 bug). It needs llama.cpp and a real model, so
@@ -345,17 +357,16 @@ the engineering to-do that came out of the C21 / qwen35 / tokenizer work.
 
 ### 7.4 Documentation that is now contradicted by the tree
 
-* `docs/10-dflash-draft-models.md` §8 says what is *not* done is "dispatch on
-  `tokenizer.ggml.pre`". Dispatch **is** implemented and gated: the ctest case
-  `tok_pre_dispatch` asserts the two rules produce different, exact id lists for a
-  mark-bearing string in fixtures that differ only in that field, plus by-name
-  refusals for an absent and an unknown `pre`. The prose needs correcting rather
-  than the code.
-* The same stale claim is in this file's sibling log — `docs/CODING-LOG.PENDING.md`
-  Phase 49's "Still open" list. Corrected by Phase 51's entry, which names it.
-* **`docs/09` §7 must be edited** to say a quantising KV codec is a *declared
-  precision reduction*, not a tier move. This is printed by `tools/i7/i7_bit_identity.py`
-  on every run (rc 0 today), so it is a standing, visible item.
+* `docs/10-dflash-draft-models.md` §8's trailing "not done" line named "dispatch on
+  `tokenizer.ggml.pre`" — corrected 2026-10-10: the dispatch **is** implemented
+  and gated (`tok_pre_dispatch` + `tools/tok_pre_rules.py`), and §8 already carries
+  the superseding note. Closed.
+* The same stale claim was in `docs/CODING-LOG.PENDING.md` Phase 49's "Still open"
+  list. Corrected by Phase 51's entry, which names it. Closed.
+* **`docs/09` §7 — no edit needed.** Verified 2026-10-10: the re-scoped I7 text is
+  already in the tree ("a quantising KV codec … is a **declared precision
+  reduction** … never conflated with a tier move"). The register asked for the
+  edit before the re-scope landed; the re-scope landed. Closed.
 
 ### 7.5 Targets and measurement
 
@@ -367,4 +378,12 @@ the engineering to-do that came out of the C21 / qwen35 / tokenizer work.
   clock domain, which the profile gate already pins.
 * **The `qwen35` files' token counts and dims are what the files declare.**
   `dflash.selector_top_k = 16` in particular is read as a *declared* parameter
-  whose use inside the selector is not established.
+  whose use inside the selector is not established. Closed 2026-10-11: the
+  disposition is recorded in docs/10 §8 — declared-not-yet-used; the loader
+  reads it as metadata (DFlash bootstrap carries no selector tensors at all, so
+  no loader arithmetic may assume it); its consumer is the C20 drafter's
+  token-selection path.
+* **TowardsDataScience URL never provided** — closed 2026-10-11: no TDS/Medium
+  article exists; the cited source is the GitHub repo JohnTDI-cpu/rdna4-wmma-guide,
+  which docs/REFERENCE-SPEEDS.md already links correctly (Medium probe 403,
+  Freedium unresolvable).

@@ -1,0 +1,14 @@
+STARTED 10-10-2026 18:05:46.30 
+seed 1: logging to C:\x\records\tok-fuzz-5000\seed1-5000.log
+seed 1: ok=5031 boundary=0 policy=1 tokens=36555 (cross-check total 5032)
+seed 2: logging to C:\x\records\tok-fuzz-5000\seed2-5000.log
+seed 2: ok=5031 boundary=0 policy=1 tokens=36555 (cross-check total 5032)
+seed 3: logging to C:\x\records\tok-fuzz-5000\seed3-5000.log
+seed 3: ok=5031 boundary=0 policy=1 tokens=36555 (cross-check total 5032)
+
+total: 15000 completed prompts, 15093 identical, 3 policy, 0 boundary, 109665 tokens; 0 unfinished seed(s)
+seed 1: rc=0 ok=5031 boundary=0 policy=1 tokens=36555 complete=True log=C:\x\records\tok-fuzz-5000\seed1-5000.log
+seed 2: rc=0 ok=5031 boundary=0 policy=1 tokens=36555 complete=True log=C:\x\records\tok-fuzz-5000\seed2-5000.log
+seed 3: rc=0 ok=5031 boundary=0 policy=1 tokens=36555 complete=True log=C:\x\records\tok-fuzz-5000\seed3-5000.log
+VERDICT: PASS — no merge-boundary divergence survived across all seeds.
+FUZZ_EXIT=0 

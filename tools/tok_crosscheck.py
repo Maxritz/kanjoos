@@ -744,21 +744,32 @@ def main():
         with open(path, "wb") as fh:
             fh.write(s.encode("utf-8"))
         e = engine_ids(args.engine, args.model, path)
-        if max_tokens and len(e) > max_tokens:
-            print("%-44s %7d %7d %7d  TRUNCATED for comparison (n=%d > %d)"
-                  % (shown, len(e), len(lp), len(lr), len(e), max_tokens))
-            e = e[:max_tokens]
-            tokens += len(e)
         lp = llama_ids(args.llama_tokenize, args.model, path, True)
-        if max_tokens and len(lp) > max_tokens:
-            print("%-44s %7d %7d %7d  TRUNCATED for comparison (n=%d > %d)"
-                  % (shown, len(e), len(lp), len(lr), len(lp), max_tokens))
-            lp = lp[:max_tokens]
         lr = llama_ids(args.llama_tokenize, args.model, path, False)
-        if max_tokens and len(lr) > max_tokens:
-            print("%-44s %7d %7d %7d  TRUNCATED for comparison (n=%d > %d)"
-                  % (shown, len(e), len(lp), len(lr), len(lr), max_tokens))
-            lr = lr[:max_tokens]
+        # The cap: truncate each list for the comparison and say so, with the
+        # FULL length, before the verdict row prints the capped ones. All three
+        # lists are fetched first because every notice names all three lengths —
+        # printing the engine's notice before llama ran referenced variables
+        # that did not exist yet (UnboundLocalError, hit by the first run that
+        # ever crossed the cap).
+        if max_tokens:
+            full = (len(e), len(lp), len(lr))
+            capped = []
+            if full[0] > max_tokens:
+                e = e[:max_tokens]
+                capped.append("engine %d" % full[0])
+            if full[1] > max_tokens:
+                lp = lp[:max_tokens]
+                capped.append("llama-parse %d" % full[1])
+            if full[2] > max_tokens:
+                lr = lr[:max_tokens]
+                capped.append("llama-raw %d" % full[2])
+            if capped:
+                # one notice per prompt, before the verdict row that carries the
+                # capped lengths: the full lengths are the interesting part.
+                print("%-44s %7d %7d %7d  TRUNCATED for comparison (%d): %s"
+                      % (shown, full[0], full[1], full[2], max_tokens,
+                         ", ".join(capped)))
         tokens += len(e)
         if e == lp and e == lr:
             ok += 1

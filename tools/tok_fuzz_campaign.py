@@ -42,6 +42,16 @@ Same seed, fewer prompts (the common case this harness actually used for):
 The cross-check is invoked with `--fuzz-bound`, so a re-run with a smaller --per-seed
 is a prefix of the full run (same sequence, just truncated), not a different run.
 
+Different fuzz seed per seed unless `--fuzz-seed` is given explicitly (that
+spelling is the reproducible one-series-x-N mode, kept deliberately): seed s
+passes the cross-check `--fuzz-seed base + (s-1)`, so N seeds are N independent
+prompt series — measured rule, 2026-10-11: the first 15,000-prompt campaign ran
+all three seeds at fuzz_seed=1, so its three 5,032-string series were identical
+and its true coverage was one series, not three. Each seed's log header now names
+the fuzz seed THAT seed used, and the summary line records the mode
+(`fuzz_seed=1, 2, 3 (one per seed)` vs `fuzz_seed=1 (explicit; every seed
+reused it)`), so the coverage shape is visible in the record itself.
+
 The campaign invokes the cross-check with `--fuzz-min-fail <per_seed+1>` so that
 the tool's own exit status is consistent with the campaign's: a run that compares
 fewer than the requested prompts cannot exit 0 on the strength of the subset it
@@ -175,7 +185,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--per-seed", default=None, type=int,
                     help="prompts per seed (default: 5000; example: --per-seed 60)")
     ap.add_argument("--fuzz-seed", default=None, type=int,
-                    help="fuzz prompt seed when --seeds is a single seed "
+                    help="base fuzz prompt seed. With --seeds N this seeds the "
+                         "FIRST seed only; each later seed then uses seed+1, "
+                         "seed+2, ... so N seeds are N different prompt series. "
                          "(default: 1; example: --fuzz-seed 11)")
     ap.add_argument("--no-fuzz-verbose", action="store_true", default=False,
                     help="suppress the per-prompt fuzz output (for a smaller log)")
@@ -198,6 +210,7 @@ def main(argv: list[str] | None = None) -> int:
     seeds = tuple(args.seeds) if args.seeds is not None else DEFAULT_SEEDS
     per_seed = int(args.per_seed) if args.per_seed is not None else DEFAULT_PER_SEED
     fuzz_seed = int(args.fuzz_seed) if args.fuzz_seed is not None else DEFAULT_FUZZ_SEED
+    explicit_fuzz_seed = args.fuzz_seed is not None
     fuzz_verbose = not args.no_fuzz_verbose
 
     run_meta = {
@@ -240,7 +253,8 @@ def main(argv: list[str] | None = None) -> int:
             log.write(f"KNJ_TOK_MODEL={os.environ.get('KNJ_TOK_MODEL')}\n")
             log.write(f"KNJ_LLAMA_TOKENIZE={os.environ.get('KNJ_LLAMA_TOKENIZE')}\n")
             log.write(f"KNJ_ENGINE={os.environ.get('KNJ_ENGINE')}\n")
-            log.write(f"fuzz_seed={fuzz_seed}  per_seed={per_seed}\n\n")
+            seed_fuzz = fuzz_seed if explicit_fuzz_seed else fuzz_seed + (seed - 1)
+            log.write(f"fuzz_seed={seed_fuzz}  per_seed={per_seed}\n\n")
             # Flush the header now: this run streams its RESULT rows only after
             # the cross-check exits (stdout is captured), so an unflushed header
             # made a healthy two-hour run indistinguishable from a dead one --
@@ -249,7 +263,7 @@ def main(argv: list[str] | None = None) -> int:
 
             cmd = [sys.executable, CROSS, "--model", model, "--engine", engine,
                    "--llama-tokenize", tokenize,
-                   "--fuzz", str(per_seed), "--fuzz-seed", str(fuzz_seed),
+                   "--fuzz", str(per_seed), "--fuzz-seed", str(seed_fuzz),
                    "--fuzz-bound", str(per_seed),
                    "--fuzz-min-fail", str(per_seed + 1)]
             if fuzz_verbose:
@@ -331,7 +345,10 @@ def main(argv: list[str] | None = None) -> int:
         f.write(f"total_tokens={total_tokens}\n")
         f.write(f"crosscheck_sha256={run_meta['crosscheck_sha256']}\n")
         f.write(f"crosscheck_display_sha256={run_meta['crosscheck_display_sha256']}\n")
-        f.write(f"fuzz_seed={fuzz_seed}\n")
+        if explicit_fuzz_seed:
+            f.write(f"fuzz_seed={fuzz_seed} (explicit; every seed reused it — one prompt sequence x N)\n")
+        else:
+            f.write("fuzz_seed=" + ", ".join(str(fuzz_seed + s - 1) for s in seeds) + " (one per seed)\n")
         f.write("\nper_seed:\n")
         for row in per_seed_rows:
             f.write(f"seed{row['seed']}: rc={row['rc']} ok={row['ok']} "

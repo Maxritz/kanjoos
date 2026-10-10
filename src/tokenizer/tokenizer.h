@@ -215,10 +215,13 @@ class Tokenizer {
   // True when the id is a CONTROL / USER_DEFINED token (never produced by BPE).
   bool is_special(int32_t id) const;
 
- private:
   // Pre-tokeniser: split `text` into the chunks the merge table may operate on,
-  // under the rule the file declared.
+  // under the given rule. Public so the alternative-sweep gate
+  // (tests/unit/test_tok_pre_sweep.cpp) can call it directly; production code
+  // reaches it through encode().
   static std::vector<std::string> pretokenize(const std::string& text, PreRule rule);
+
+ private:
 
   // The two maps hold VIEWS, not copies, in an open-addressing table (see
   // TokViewMap for the measurement that chose it). Every key's bytes live in

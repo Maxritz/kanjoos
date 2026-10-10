@@ -1,0 +1,9 @@
+# Class-rule mutant vs current tree, 200 fuzz prompts (seed 1) — 2026-10-10
+# Mutant: unicode_class returns Letter for any cp >= 0x80 (the pre-fix byte
+# test lifted to codepoints); built as tmp/mutant-run.exe, source restored
+# afterwards (grep MUTANT src/tokenizer/unicode_ranges.cpp -> 0).
+# Model: G:\More-models\Qwen3-30B-A3B-abliterated-erotic.i1-Q2_K.gguf (qwen3moe)
+# Reference leg (mutant vs llama-tokenize) NOT RUN: no llama-tokenize on this
+# machine. Current-vs-llama on the same generator family is PASS (MACX seed-1
+# 5000-prompt campaign, VERDICT: PASS, 0 boundary).
+prompts=200 same=200 diverged=0

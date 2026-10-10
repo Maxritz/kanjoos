@@ -1,0 +1,13 @@
+engine        : C:/Users/rr/OneDrive/Desktop/Kanjoos/build/cmake-host/kanjoos-run.exe
+llama.cpp     : C:/Users/rr/OneDrive/Desktop/dxl/llama.cpp/build/bin/llama-tokenize.exe
+model         : G:\More-models\Qwen3-30B-A3B-abliterated-erotic.i1-Q2_K.gguf
+strings       : 1 (each written to a file and read with --prompt-file / -f)
+engine ids    : `--dump-tokens -n 0` (`prompt ids :`) or the qwen35 probe's `id(s):`, whichever this architecture prints
+
+string                                        engine   llama   llama  verdict
+                                                 ids   parse     raw  
+# 00 — Verified facts Everything in thi...     32112   32112   32112  TRUNCATED for comparison (2048): engine 32112, llama-parse 32112, llama-raw 32112
+# 00 — Verified facts Everything in thi...      2048    2048    2048  PASS
+
+1/1 strings identical, 0 policy difference(s), 0 merge-boundary difference(s), 2048 tokens compared
+VERDICT: PASS -- every merge boundary agrees with llama.cpp on every string.

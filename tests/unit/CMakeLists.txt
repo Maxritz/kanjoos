@@ -131,10 +131,32 @@ target_compile_definitions(test_tok_whitespace_run PRIVATE
     KNJ_TOK_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures/tok"
 )
 
+# ---------------------------------------------------------------------------
+# The pre-tokeniser alternative sweep.
+#
+# Only the whitespace-run alternative was ever swept against llama.cpp's
+# behaviour; the other six were emulated from prose. The expectations in
+# test_tok_pre_sweep.cpp are splits produced by the reference's ACTUAL QWEN2 /
+# QWEN35 patterns (tools/tok_pre_sweep.py extracts them mechanically from
+# llama.cpp's src/llama-vocab.cpp; records/tok-pre-sweep-2026-10-10.log carries
+# the reviewed output). pretokenize() is static, so no fixture is needed.
+add_executable(test_tok_pre_sweep
+    test_tok_pre_sweep.cpp
+    ${CMAKE_SOURCE_DIR}/src/tokenizer/tokenizer.cpp
+    ${CMAKE_SOURCE_DIR}/src/tokenizer/unicode_ranges.cpp
+    ${CMAKE_SOURCE_DIR}/src/loader/gguf.cpp
+    ${CMAKE_SOURCE_DIR}/src/profiler/profiler.cpp
+    ${CMAKE_SOURCE_DIR}/src/platform/memprobe.cpp
+)
+
+target_include_directories(test_tok_pre_sweep PRIVATE ${CMAKE_SOURCE_DIR})
+target_compile_features(test_tok_pre_sweep PRIVATE cxx_std_17)
+
 enable_testing()
 add_test(NAME c21_profiler COMMAND test_c21_profiler)
 add_test(NAME tok_pre_dispatch COMMAND test_tok_pre_dispatch)
 add_test(NAME tok_whitespace_run COMMAND test_tok_whitespace_run)
+add_test(NAME tok_pre_sweep COMMAND test_tok_pre_sweep)
 
 # ---------------------------------------------------------------------------
 # The python tool gates.
@@ -174,13 +196,21 @@ if(KNJ_PYTHON)
            COMMAND ${KNJ_PYTHON} ${CMAKE_SOURCE_DIR}/tools/tok_pre_rules.py)
   add_test(NAME tok_fuzz_campaign
            COMMAND ${KNJ_PYTHON} ${CMAKE_SOURCE_DIR}/tools/tok_fuzz_campaign.py)
+  # The fixture generator proves `tests/fixtures/tok/` is what it would write,
+  # so a vocabulary change committed with stale fixtures fails here instead of
+  # silently testing old bytes. Needs only the `gguf` package (no model, no
+  # llama.cpp); without it the tool exits 3 and reads as SKIPPED, like the rest.
+  add_test(NAME tok_fixtures
+           COMMAND ${KNJ_PYTHON} ${CMAKE_SOURCE_DIR}/tools/make_tok_fixtures.py
+                   --check)
   set_tests_properties(tools_smoke tok_separator_sweep tok_pre_rules tok_fuzz_campaign
+                       tok_fixtures
                        PROPERTIES SKIP_RETURN_CODE 3)
 
 else()
   message(STATUS "no python interpreter found: the python tool gates (tools_smoke, "
-                 "tok_separator_sweep, tok_pre_rules, tok_fuzz_campaign) are NOT "
-                 "registered; set -DKNJ_PYTHON=<python.exe> to register them")
+                 "tok_separator_sweep, tok_pre_rules, tok_fuzz_campaign, tok_fixtures) "
+                 "are NOT registered; set -DKNJ_PYTHON=<python.exe> to register them")
 endif()
 
 # ---------------------------------------------------------------------------

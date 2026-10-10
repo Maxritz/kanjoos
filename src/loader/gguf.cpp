@@ -263,9 +263,11 @@ size_t ggml_type_block_bytes(GgmlType t) {
     case GgmlType::Q1_0:  return 2 + 16;
     // The IQ family and MXFP4: sizes taken from gguf-py's GGML_QUANT_SIZES
     // (`python -c "from gguf.constants import GGML_QUANT_SIZES as Q; print(Q)"`),
-    // not from memory. The engine has no decoder for any of them (see
-    // ggml_type_is_dequantizable); the sizes exist so the container can be read
-    // and the refusal can name the type per tensor.
+    // not from memory. Decoders for all of them live in src/loader/dequant.cpp
+    // (dequant_iq*, dequant_mxfp4) and are validated bit-exact vs gguf-py by
+    // tools/dequant_validate.py (21/21 PASS, 2026-10-10); the sizes exist so the
+    // container can be read even where a decoder is missing, and any refusal
+    // names the type per tensor (see ggml_type_is_dequantizable).
     case GgmlType::IQ2_XXS: return 66;
     case GgmlType::IQ2_XS:  return 74;
     case GgmlType::IQ3_XXS: return 98;

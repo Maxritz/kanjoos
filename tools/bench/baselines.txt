@@ -47,3 +47,17 @@
 gfx1201  gemm_tiled  BEST_PCT    min  21.4  s/.*BEST:[[:space:]]+M=1024[[:space:]]+at[[:space:]]+([0-9.]+)%.*/\1/p
 gfx1201  attn_c16    PREFILL_US  max  5500  s/.*prefill[[:space:]]+2048x8[[:space:]]+GQA4[[:space:]]+([0-9.]+).*/\1/p
 gfx1201  attn_c16    DECODE_US   max  200   s/.*decode[[:space:]]+step[[:space:]]+x8x8[[:space:]]+([0-9.]+).*/\1/p
+#
+# gfx1031 pins (first cut, 2026-10-10; reason: Phase 59 measured the first
+# gfx1031 tier-C numbers on MACX and the register demanded pins). Reference
+# machine: RX 6700 XT, gfx1031, 20 CU @ 2424 MHz, D:\Rocm10 therock tree.
+# Compared ONLY on gfx1031 runs (arch-scoped); the print formats are
+# arch-independent (same driver sources), so the sed expressions are shared
+# with gfx1201. expert_gemm has no pin: its line reports split-K best without
+# a BEST:/prefill/decode marker the gate can read.
+#   gemm_tiled M=1024: 4.06 TFLOP/s, 16.4% of 24.8 derived peak -> pin 16.4
+#   attn_c16 prefill 8925 us -> pin 9800 (+10% headroom, same rule as gfx1201)
+#   attn_c16 decode 220.9 us (76 GB/s, 23% of roof) -> pin 245 (+11%)
+gfx1031  gemm_tiled  BEST_PCT    min  16.4  s/.*BEST:[[:space:]]+M=1024[[:space:]]+at[[:space:]]+([0-9.]+)%.*/\1/p
+gfx1031  attn_c16    PREFILL_US  max  9800  s/.*prefill[[:space:]]+2048x8[[:space:]]+GQA4[[:space:]]+([0-9.]+).*/\1/p
+gfx1031  attn_c16    DECODE_US   max  245   s/.*decode[[:space:]]+step[[:space:]]+x8x8[[:space:]]+([0-9.]+).*/\1/p

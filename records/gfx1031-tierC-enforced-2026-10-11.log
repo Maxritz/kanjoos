@@ -1,0 +1,204 @@
+clang : /d/Rocm10/lib/llvm/bin/clang.exe (AMD clang version 23.0.0git (https://github.com/ROCm/llvm-project.git 0bace1908348b840e6aa1b4b6e12151dae208158))
+hipcc : /d/Rocm10/bin/hipcc.exe
+arch  : gfx1031
+files : attn_c16.hip expert_gemm.hip gemm_tiled.hip gemm_w4.hip gemm_wmma.hip knj_xfer_probe.hip q4k_moe_ffn.hip q4k_stream_ffn.hip rocwmma_attn.hip rocwmma_layout_probe.hip rocwmma_moe.hip rocwmma_tput.hip trace_components.hip wmma_layout.hip wmma_run.hip wmma_tile_probe.hip 
+
+==============================================================================
+TIER C  device run (gfx1031)
+==============================================================================
+  attn_c16       device AMD Radeon RX 6700 XT  arch gfx1031  20 CU  2424 MHz
+packed-f16 peak, derived: 24.8 TFLOP/s
+
+measured VRAM roofline: 330.1 GB/s (streaming 256 MB)
+
+validate S=512 H=4 G=2 (GQA)  prefill relRMSE 1.80e-04 PASS   decode relRMSE 1.22e-04 PASS
+validate S=512 H=4 G=4 (MQA)  prefill relRMSE 1.80e-04 PASS   decode relRMSE 1.84e-04 PASS
+spot oracle at timing config: prefill 1.38e-04 PASS, decode 1.97e-04 PASS
+
+   kernel                     us   TFLOP/s  %peak     GB/s  %roof
+   prefill 2048x8 GQA4      8926.6     0.963     3.9%      1.2     0.4%
+   decode  step x8x8          216.0     0.311     1.3%     77.7    23.5%
+
+   cycles/score-round (CU-amortized): prefill 26, decode 80
+
+   decode is memory-bound by construction (docs/00 8.3): 16.8 MB of K+V per step - %roof carries it.
+   prefill is NEITHER DRAM-bound (0.4% roof: KV re-reads are L2-resident) NOR near
+   compute peak: %peak is the headroom the score round still has. Its levers are
+   residency (tile size) and the serial chain - both applied in this file.
+RESULT: PASS
+  baseline attn_c16      PREFILL_US  pinned max 9800 got 8926.6     (10% tol)
+  baseline attn_c16      DECODE_US   pinned max 245  got 216.0      (10% tol)
+
+  expert_gemm    device AMD Radeon RX 6700 XT  arch gfx1031  20 CU  wave 32  2424 MHz  2048 thr/CU (max 64 waves/CU)
+packed-f16 peak, derived from CU count and clock: 24.8 TFLOP/s
+
+correctness: all 24576 output elements against a double oracle
+  relative RMSE        1.008e-03
+  max |error|          0.0157  (5.18e-03 of the 3.034 output RMS)
+  exactly-zero outputs 0 of 24576
+  PASS (fp16 in, fp32 accumulate; ~1e-3 is the expected floor)
+
+tiling and occupancy census (this is what the profiler would say)
+  tile per block      32 rows x 64 cols, 128 threads, split-K 4
+  per thread          8 rows x 2 cols = 16 accumulators,
+                       10 loads per 16 v_pk_fma_f16  (0.62 loads/FMA)
+  grid                1 x 12 x 4 = 48 blocks on 20 CU
+  waves               192 total, 9.6 per CU of 64 possible  -> 15.0% theoretical occupancy
+  B re-read           1 time(s) (once per row-block)
+
+measured bandwidth
+  VRAM   301.3 GB/s  streaming 512 MB        <- the GEMM's own roofline
+  PCIe    24.9 GB/s  streaming 256 MB pinned <- roofline for experts
+  PCIe    11.6 GB/s  one 2.47 MB expert copy  <- the size that matters
+
+expert GEMM [32 x 2048] * [2048 x 768], SIMT packed-f16, split-K sweep
+   KS   blocks    us   TFLOP/s   % of peak   GB/s   % of VRAM roofline
+     1      12   747.3     0.13      0.5%     4.2      1.4%
+     2      24   412.9     0.24      1.0%     7.6      2.5%
+     4      48   258.0     0.39      1.6%    12.2      4.0%
+     8      96   137.9     0.73      2.9%    22.8      7.6%
+    16     192    89.4     1.13      4.5%    35.2     11.7%
+    32     384    82.6     1.22      4.9%    38.1     12.6%
+    64     768    74.2     1.36      5.5%    42.4     14.1%
+
+  best: split-K 64 at 74.2 us = 1.36 TFLOP/s = 5.5% of derived peak
+  was 0.8% of peak at 1 column/thread with no split-K.
+
+WHY NO KERNEL CAN DO MUCH BETTER AT M=32
+  minimum bytes that must move     4.72 MB  (B once, A per column block)
+  arithmetic intensity             21.3 FLOP/byte
+  machine balance (peak / BW)      82.4 FLOP/byte
+  => hard ceiling at M=32          25.9% of peak, whatever the code does
+  this kernel reaches               5.5% of peak =  21.1% of that ceiling
+
+  The M=32 shape is byte-bound: 21 FLOP/byte cannot buy 82 of
+machine. Raising M is the only thing that moves this ratio; tiling, registers and split-K cannot.
+
+one expert at M=32: 302 MFLOP
+  arithmetic at DERIVED peak   12.166 us
+  arithmetic in this kernel      222.6 us  (18x off peak)
+  transfer over PCIe (11.6 GB/s)  212.6 us
+
+WHAT BIT-WIDTH BUYS, at the MEASURED 11.6 GB/s PCIe
+Every row is one full 128-expert sweep -- the worst case, where all
+32 tokens route to disjoint experts. Quality is NOT modelled here;
+only bytes are. An actual W2/W3 design has to beat the 81.5 dB SNR
+penalty that killed the int4 activation path (gemm_w4.hip).
+   format   B/weight   expert MB   128 experts   vs peak arithmetic
+   W4 g128    0.5234       2.47      27.22 ms        17.5x  (transfer-bound)
+   W3 g128    0.3984       1.88      20.72 ms        13.3x  (transfer-bound)
+   W2 g128    0.2734       1.29      14.22 ms         9.1x  (transfer-bound)
+
+  To become compute-bound, PCIe would have to reach 203.0 GB/s at W4.
+  No shipping interconnect is close, so the crossover cannot be moved
+  by tuning -- only by moving fewer bytes.
+  Halving to W2 only buys 1.9x, because the arithmetic side is already
+  near free. That is the honest shape of this problem: it is a byte-
+  movement problem wearing an inference engine's clothes.
+
+  gemm_tiled     device AMD Radeon RX 6700 XT  arch gfx1031  20 CU  wave 32  2424 MHz
+packed-f16 peak, derived from CU count and clock: 24.8 TFLOP/s
+
+kernel: LDS-tiled 64x64, TK=32, 128 thr, 8x4 accumulators/thread, v_pk_fma_f16
+
+occupancy census: 128 regs/thread, 8192 B LDS/block, 131072 reg dwords/CU
+  waves active/CU: 32 (driver: 8 blocks x 4 waves)
+  waves possible: reg-cap 32, LDS-cap 32 (64 KB CU LDS)
+  concurrency probe: 1 blk 39.42 ms, 32 blks 42.57 ms, 64 blks 42.93 ms
+  => 2+ blocks/CU run concurrently (64-block time 1.01x the 32-block time)
+
+measured VRAM roofline: 221.9 GB/s (streaming 256 MB)
+
+  M     us  TFLOP/s  %peak   GB/s  %roof   RMSE    zeros  blocks
+    [1 element(s) computed to 0.0 with |want| <= 0.05, inside the f16-chain noise floor]
+    noise: worst |err| = 0.0384
+   32  305.3     0.33     1.3%   11.1    5.0%  2.8e-03      0      12  PASS
+    [1 element(s) computed to 0.0 with |want| <= 0.05, inside the f16-chain noise floor]
+    noise: worst |err| = 0.0394
+  128  335.3     1.20     4.8%   21.5    9.7%  2.9e-03      0      24  PASS
+    [1 element(s) computed to 0.0 with |want| <= 0.05, inside the f16-chain noise floor]
+    noise: worst |err| = 0.0425
+  512  832.1     1.94     7.8%   34.7   15.6%  2.9e-03      0      96  PASS
+    [1 element(s) computed to 0.0 with |want| <= 0.05, inside the f16-chain noise floor]
+    noise: worst |err| = 0.0425
+ 1024  789.8     4.08    16.4%   73.0   32.9%  2.9e-03      0     192  PASS
+
+BEST: M=1024 at 16.4% of the derived packed-f16 peak (4.1 TFLOP/s of 24.8)
+M=32 is byte-bound by construction (see expert_gemm.hip section 5: 0 FLOP/byte
+available vs 112 machine balance) - its number is a roofline verdict, not a kernel verdict.
+RESULT: PASS
+  baseline gemm_tiled    BEST_PCT    pinned min 16.4 got 16.4       (10% tol)
+
+  knj_xfer_probe === knj_xfer_probe -- decompose the streamed expert transfer rate ===
+device      AMD Radeon RX 6700 XT (gfx1031)
+file        (none given -- read side uses a host fill; read-only case NOT RUN)
+slab        2580480 bytes (2.4609 MiB)   count 64   offset 0
+total       157.50 MiB per case
+  A read-only                   NOT RUN (no file argument; a host-fill rate is not a read rate)
+
+--- transport decomposition (each case: 64 x 2.4609 MiB) ---
+  A read-only                NOT RUN (see note above)
+  B h2d-blocking-stream       10620.51 MiB/s      0.232 ms/copy   (165150720 bytes in 0.015 s)
+  C h2d-nonblocking-stream    10651.54 MiB/s      0.231 ms/copy   (165150720 bytes in 0.015 s)
+  D fill+h2d pipelined         7744.81 MiB/s      0.318 ms/copy   (165150720 bytes in 0.020 s)
+  E fill +sync-d2h (block)     3869.31 MiB/s      0.636 ms/copy   (165150720 bytes in 0.041 s)
+  F fill +sync-d2h (nonblk)    4317.69 MiB/s      0.570 ms/copy   (165150720 bytes in 0.036 s)
+
+  reference (docs/00 section 8): one 2.47 MB expert copy = 13.4-14.7 GB/s = 13926 MiB/s
+  B h2d-blocking-stream      0.763x the single-copy reference
+  C h2d-nonblocking-stream   0.765x the single-copy reference
+  D fill+h2d pipelined       0.556x the single-copy reference
+  E fill +sync-d2h (block)   0.278x the single-copy reference
+  F fill +sync-d2h (nonblk)  0.310x the single-copy reference
+  ratio E/D (does the harness's sync D2H cost anything?):          2.002x
+  ratio F/E (does the stream flag recover it?):                    0.896x
+
+=== Summary ===
+  checks failed: 0
+
+RESULT: PASS
+
+  q4k_moe_ffn    REFUSED/UNBUILT  static assertion failed: Unsupported architecture
+  q4k_stream_ffn REFUSED/UNBUILT  static assertion failed: Unsupported architecture
+  rocwmma_attn   REFUSED/UNBUILT  static assertion failed: Unsupported architecture
+  rocwmma_layout_probe REFUSED/UNBUILT  static assertion failed: Unsupported architecture
+  rocwmma_moe    REFUSED/UNBUILT  static assertion failed: Unsupported architecture
+  rocwmma_tput   REFUSED/UNBUILT  static assertion failed: Unsupported architecture
+  trace_components   device  AMD Radeon RX 6700 XT  gfx1031  20 CU  wave32
+  build   --offload-arch=gfx-1 -O2 -nogpulib  (HIP 7.16)
+
+  equivalence: 0 mismatches, 260957/262144 rows differ from row 0
+     component           ops   %dev      dev us     idle us     host us
+     h2d_pinned              8   33.6%   202645.80        0.00   202582.70
+     h2d_pageable            8   30.9%   186252.50        0.00   222687.00
+     micro_simt_pk16      2000   14.8%    89204.84    14836.56     2341.50
+     d2h_pinned              4   13.1%    78986.31        0.00   145894.90
+     grid_f32_bulk           8    5.7%    34293.76       92.94       24.10
+     grid_f32_coalesced      8    0.7%     3956.64       48.56       10.00
+     grid_f32_256blk         8    0.4%     2583.20       74.90       10.40
+     dispatch_empty        256    0.4%     2460.42      452.88     4536.20
+     micro_simt_f32       2000    0.4%     2415.64     8292.26     2718.10
+     grid_mul_4096blk        8    0.1%      396.80       61.80       14.80
+     arch_guard           4096    0.0%        0.00        0.00        1.60
+     device_props           16    0.0%        0.00        0.60        4.20
+     alloc_256mb             8    0.0%        0.00        0.30   180516.00
+     alloc_pinned_256mb      8    0.0%        0.00        0.20    56820.10
+     sync_drained           32    0.0%        0.00        0.90       73.80
+   instrumentation floor, 256 empty ops timed through the same begin/end path: 0.02 us host, 82.20 us device each.
+
+RESULT: PASS
+
+  wmma_layout    REFUSED/UNBUILT  '__builtin_amdgcn_wmma_f32_16x16x16_f16_w32_gfx12' needs tar
+  wmma_run       REFUSED/UNBUILT  '__builtin_amdgcn_wmma_f32_16x16x16_f16_w32_gfx12' needs tar
+  wmma_tile_probe REFUSED/UNBUILT  '__builtin_amdgcn_wmma_f32_16x16x16_f16_w32_gfx12' needs tar
+  q4k_moe_ffn.hip: SKIPPED on gfx1031 (no WMMA on RDNA2 — correct refusal, not a result)
+  q4k_stream_ffn.hip: SKIPPED on gfx1031 (no WMMA on RDNA2 — correct refusal, not a result)
+  rocwmma_attn.hip: SKIPPED on gfx1031 (no WMMA on RDNA2 — correct refusal, not a result)
+  rocwmma_layout_probe.hip: SKIPPED on gfx1031 (no WMMA on RDNA2 — correct refusal, not a result)
+  rocwmma_moe.hip: SKIPPED on gfx1031 (no WMMA on RDNA2 — correct refusal, not a result)
+  rocwmma_tput.hip: SKIPPED on gfx1031 (no WMMA on RDNA2 — correct refusal, not a result)
+  wmma_layout.hip: SKIPPED on gfx1031 (no WMMA on RDNA2 — correct refusal, not a result)
+  wmma_run.hip: SKIPPED on gfx1031 (no WMMA on RDNA2 — correct refusal, not a result)
+  wmma_tile_probe.hip: SKIPPED on gfx1031 (no WMMA on RDNA2 — correct refusal, not a result)
+MACX tierC gfx1031: PASS
+TIERC_EXIT=0

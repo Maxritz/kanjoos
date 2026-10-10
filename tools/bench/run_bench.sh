@@ -145,9 +145,14 @@ is_device_driver() { grep -qE '#include[[:space:]]*<hip/hip_runtime\.h>|hipMallo
 # ROCm tree that has amdhip64.lib for the link line. The device bitcode is
 # LLVM's (not per-arch), and the target is selected by --offload-arch, so one
 # hipcc links both arches. We only need a tree whose lib/ contains amdhip64.lib
-# (or amdhip64_7.lib) for the -L link path. On this machine that is
-# /g/ROCM10RT-gfx1201/lib  (and /c/ROCm72/lib as a fallback).
+# (or amdhip64_7.lib) for the -L link path. Defaults are this machine's trees
+# (/g/ROCM10RT-*, /c/ROCm72/lib fallback); any other machine overrides per-arch
+# via KNJ_ROCM_GFX1201 / KNJ_ROCM_GFX1031 (e.g. MACX: KNJ_ROCM_GFX1031=D:/Rocm10),
+# the link fallback via KNJ_ROCM_FALLBACK_LIB, and hipcc via KNJ_HIPCC or
+# KNJ_HIPCC_CANDIDATES below. No -D arch flag exists anywhere: see AGENTS.md §4.5.
 rocm_lib_root_for_arch() {
+  local override_var="KNJ_ROCM_${1^^}"
+  if [ -n "${!override_var:-}" ]; then echo "${!override_var}"; return 0; fi
   case "$1" in
     gfx1201) echo "/g/ROCM10RT-gfx1201" ;;
     gfx1031) echo "/g/ROCM10RT-gfx1031" ;;
@@ -156,7 +161,7 @@ rocm_lib_root_for_arch() {
 }
 find_rocm_lib_path() {
   local root="${1:-}"
-  for cand in "${root}/lib" "/c/ROCm72/lib"; do
+  for cand in "${root}/lib" "${KNJ_ROCM_FALLBACK_LIB:-/c/ROCm72/lib}"; do
     if [ -f "${cand}/amdhip64.lib" ] || [ -f "${cand}/amdhip64_7.lib" ] || [ -f "${cand}/amdhip64.dll" ]; then
       echo "$cand"; return 0
     fi
@@ -508,7 +513,9 @@ if [ -z "$HIPCC" ] && command -v hipcc >/dev/null 2>&1; then
   HIPCC="$(command -v hipcc)"
 fi
 if [ -z "$HIPCC" ]; then
-  for cand in /c/ROCm72/bin/hipcc.exe /c/ROCm72/bin/hipcc; do
+  # shellcheck disable=SC2206 -- word-splitting the candidate list is intended
+  read -r -a _hipcc_cands <<< "${KNJ_HIPCC_CANDIDATES:-/c/ROCm72/bin/hipcc.exe /c/ROCm72/bin/hipcc}"
+  for cand in "${_hipcc_cands[@]}"; do
     if [ -x "$cand" ]; then HIPCC="$cand"; break; fi
   done
 fi
