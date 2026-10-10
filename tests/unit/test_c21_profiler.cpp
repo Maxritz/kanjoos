@@ -188,7 +188,16 @@ int main() {
   p.begin("alpha", 0);
   p.end();
   // A real gap, long enough that no clock resolution question can explain it.
+  // Guaranteed-minimum sleep, not plain sleep_for: on Windows the OS wait has
+  // been observed to return after ~1.45 ms of a 3 ms request, which made this
+  // gate flake ~1/6 runs while the profiler measured exactly right (proven by
+  // instrumenting both clocks: qpc_gap == idle_ns every run). The 2 ms
+  // assertion below is untouched -- the stimulus is fixed, not the check.
+  // The spin only ever fills an undershoot and is bounded by a monotonic clock.
+  const auto g1_t0 = std::chrono::steady_clock::now();
   std::this_thread::sleep_for(std::chrono::milliseconds(3));
+  while (std::chrono::steady_clock::now() - g1_t0 < std::chrono::milliseconds(3))
+    std::this_thread::yield();
   p.begin("beta", 0);
   p.end();
   p.step_done();

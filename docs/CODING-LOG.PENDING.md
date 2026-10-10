@@ -1323,3 +1323,172 @@ cost: llama-tokenize ×2 is now 856 ms of the 1159 ms/prompt (a batched
 reference invocation would dominate any further engine work); the engine still
 pays a full `Model::open` (~300 ms) per prompt just to reach the tokenizer (a
 metadata-only open would cut that too).
+
+# Phase 54 — sherlock-it trace: the warmup trap, the DLL trap, the LDS race, and QT=16  ·  DONE
+
+**Believed at the time**   (a) The remaining ~63 ms/prompt engine cost was unlocated;
+(b) `run_bench.sh` exit 6 meant `attn_c16` had regressed (prefill 11502 vs pin
+9650, decode 220 vs 200); (c) the kernel needed "tuning" in the abstract.
+
+**Decision**   Trace per the sherlock-it skill (trace mode): baseline →
+decompose → instrument → investigate → one variable at a time → verify.
+Three traps found before any tuning, each proven by measurement:
+1. **Profiler warmup trap.** `--tokenize-only --profiling` printed `ops 0`:
+one-shot path never calls `step_done()`, so the default `warmup 8` discarded
+the run's only sample. Fix: `warmup 0` on the tokenize-only path
+(`src/cli/main.cpp`); the table then shows the stage split. Chosen over
+calling `step_done()` because no step happened.
+2. **Strawberry-vs-Git DLL trap.** Fresh `kanjoos-run.exe` died at load
+(`0xC0000135`, bash reports 127) while same-dir unit tests ran: the builder
+is Strawberry `g++` 13.2 (`/c/Strawberry/c/bin`), but Windows PATH finds
+Git's incompatible `libwinpthread-1.dll`/`libstdc++-6.dll` first (94 KB vs
+64 KB winpthread). Proven: exe + Strawberry DLLs in an isolated dir runs;
+same exe + Git DLLs does not. The `test_c2_device` binary never imports
+winpthread, which is why it was immune. `build/` is gitignored, so the three
+Strawberry DLLs are staged next to the built exes; a durable CMake/static-link
+fix is still open (see below).
+3. **Cross-iteration LDS race in `attn_prefill`.** The top-of-loop barrier
+only syncs arrived threads, so a fast wave's next-tile `KNJ_STAGE` overwrites
+KL/VL while a straggler still reads them. Tripped 9/9 runs at 4 waves/block
+(spot oracle ~2e-2) and ~1/4 at the 2-wave baseline (one `RESULT: FAIL` in 4
+runs with spot PASS -- the same race, rarely). Fix: loop-bottom
+`__syncthreads()`, perf-neutral at QT=8 (9.6 ms before and after, 4/4 PASS).
+Tuning (one variable): QT 8→16, BLKP 64→128, rstep stride `BLKP/32`
+(12→20 waves/CU of LDS budget to hide the serial score chain). Rejected for
+now: packed-`v_pk_fma_f16` score dot (error risk against the 2e-3 tol; the
+occupancy lever won without touching numerics -- spot error identical
+1.38e-04 before/after).
+
+**Changed**   `src/cli/main.cpp` (warmup 0 on tokenize-only);
+`tools/bench/attn_c16.hip` (QT=16, BLKP=128, stride, barrier, comments);
+`tools/bench/baselines.txt` (PREFILL_US max 9650→5500 with history reason;
+DECODE_US untouched). Uncommitted carry-over from the interrupted session
+(TokViewMap, gguf honest-cap reserve, profiled stages) was kept as-is and is
+what the numbers below ran on.
+
+**Verified**
+```
+$ cmake --build build/cmake-host # exit 0; ctest --test-dir build/cmake-host
+  # 7/7 pass (tok_fuzz_campaign Skipped by design; records verdict stands)
+$ kanjoos-run --prompt-file hello --tokenize-only --ctx 1 --profiling
+  # rc 0, ids 14990 198 (identical pre/post), wall 45-57 ms warm
+  # gguf-open 13.7 ms | tok-vocab 13.7 ms | tok-merges 10.1 ms |
+  #   tokenizer-build self 2.0 ms | encode 0.06 ms (scopes sum 39.6 ms)
+$ bash tools/bench/run_bench.sh # exit 0 (was exit 6 on the noisy sample)
+  # attn_c16 PREFILL_US pinned max 5500 got 5281.2; DECODE_US max 200 got 197.4
+  # gemm_tiled BEST_PCT pinned min 21.4 got 24.2
+$ attn_c16 QT=16 isolation: 4937-5263 us, 6/6 PASS, spot 1.38e-04
+$ attn_c16 barrier-only at QT=8: 9561-9788 us, 4/4 PASS (neutral)
+```
+
+**Measurements**
+| quantity | value | provenance |
+|---|---|---|
+| tokenize-only wall, `hello`, warm | 45.7-57.2 ms (98.7 cold), n=5 | MEASURED |
+| stage split (of 39.6 ms scoped) | gguf-open 13.7, tok-vocab 13.7, tok-merges 10.1, build-self 2.0, encode 0.06 ms | MEASURED |
+| attn prefill QT=8 baseline | 9512-9704 us, 2.3% peak, relRMSE 1.8e-04 | MEASURED, n=4 |
+| attn prefill QT=16 + barrier | 4937-5263 us, 4.3-4.4% peak, relRMSE 1.38e-04 | MEASURED, n=6 |
+| attn speedup | **~1.9x** at bit-identical oracle error | DERIVED |
+| rocwmma_tput grouped prefill | 19.12/17.84 TFLOP/s (48.7% peak); decode 75-98 GB/s packed | MEASURED (bench) |
+| expert SIMT best (split-K 64) | 49.7 us, 2.02 TFLOP/s, 5.1% peak = 15.6% of M=32 byte ceiling | MEASURED (bench) |
+| 5000-prompt campaign | PASS: ok=5031, policy=1, boundary=0, tokens=36555, rc=0 | MEASURED (`records/tok-fuzz-5000/summary.txt`) |
+
+**Still open**   Quant coverage: only F32/F16/BF16/Q4_0/Q8_0/Q4_K/Q5_K/Q6_K
+decode; MXFP4 has enum+sizes but no decoder, NVFP4 has no enum entry (ggml id
+40), IQ family and Q4_1/Q5_0/Q5_1/Q8_1/Q2_K/Q3_K/Q8_K undecoded; no ROCm
+FP8/FPX microscaling path. The QT=16 kernel is SIMT (`v_pk_fma`-free), so it
+is arch-neutral for gfx1031 (6700 XT), but tier C on gfx1031 is still
+DECLINED here (no device attached) -- unrun, never a pass. Durable
+Strawberry-DLL fix (static link or post-build stage in CMake) unblocked by:
+a decision on which. Article research (TowardsDataScience CUDA-kernels piece)
+unblocked by: a web-fetch tool, absent in this session -- not summarised from
+memory. Next kernel lever, ranked: packed-`v_pk_fma_f16` score dot (needs tol
+headroom proof) or QT=32 (needs VGPR census first).
+
+### Phase 55 — quant decoder coverage closed: Q3_K hmask-first fix, 20/20 bit-exact, DLL PATH for all gates, gfx1031 compile-only  ·  DONE
+
+*(Number corrected: first written as "Phase 50", which already exists at line 988. This entry is unchanged otherwise.)*
+
+**Believed at the time**   Session brief said decoders were "F32/F16/BF16/Q4_0/Q8_0/Q4_K/Q5_K/Q6_K only (NVFP4/MXFP4/IQ/ROCMFPX open)".
+That was stale: the working copy already decoded Q4_1/Q5_0/Q5_1/Q8_1/Q1_0/TQ1_0/TQ2_0/Q2_K/Q3_K/Q8_K/MXFP4/NVFP4/IQ2_XXS/IQ2_XS/IQ2_S/IQ3_XXS/IQ3_S/IQ1_S/IQ1_M/IQ4_NL/IQ4_XS — but Q3_K had never been triple-checked, and it was wrong.
+
+**Decision**   Validated everything against gguf-py 0.19.0 (`quants.dequantize`) on identical bytes via `tools/dequant_validate.py` + `tools/dequant_bytes_probe.cpp`; Q3_K additionally against verbatim ggml C (`tmp/attnrep/q3k_ggml_ref.c`, transcribed `dequantize_row_q3_K`). Chose file-based probe I/O (bytes-file in, f32-file out) after the first harness round failed on mismatched CLI assumptions. Fixed the cause in the engine, not the checks.
+
+**Changed**
+- `src/loader/dequant.cpp` — `dequant_q3_k`: hmask/qs pointers were swapped (`qs=src, hm=src+64`). ggml `block_q3_K` is hmask[32] FIRST (`hm=x, q=x+32`, confirmed in `beellama.cpp/ggml/src/ggml-common.h:399-404`). Now `hm=src, qs=src+32`. Two-line fix; structured + random batteries went from 4/4 mismatch (e.g. qs[0]=1 gave 96.0 vs -0.0) to bit-exact.
+- `tests/unit/CMakeLists.txt` — the MinGW-runtime `ENVIRONMENT_MODIFICATION PATH` prepend now covers all seven tests (was three C++ cases); the python gates also spawn MinGW-built helpers. Decided: PATH-inject in CMake, not staged DLL copies (tmp/build scratch DLLs remain local and gitignored).
+- Scratch only (not product): `tmp/attnrep/q3k_ggml_ref.{c,exe}`, `tmp/dequant_bytes_probe.exe`, `tmp/attn_c16_gfx1031.s`.
+
+**Verified**
+- `$ python3 tools/dequant_validate.py --probe <abspath>/tmp/dequant_bytes_probe.exe` → exit 0, `AGREE`; 20/20 PASS, every one `exact=N/N maxabs=0.000e+00` (Q1_0/Q8_1/Q8_K via exact-construction, rest vs gguf-py codec). NOTE: probe path must be absolute — a relative `tmp/...` path fails with FileNotFoundError from subprocess on this machine.
+- `$ ctest --test-dir build/cmake-host --output-on-failure` → exit 0 after reconfigure+rebuild (6 pass, tok_fuzz_campaign Skipped by design, exit 3).
+- Q3_K battery (qslow/qhm/qones/qrand/qr0-qr3): engine == ggml-C == gguf-py bit-exact 8/8.
+- gfx1031 compile-only: gfx1031-tree clang `--offload-arch=gfx1031 -S tools/bench/attn_c16.hip` → rc=0, warnings only (pre-existing nodiscard/getenv). Mixing the gfx1201 clang with the gfx1031 tree fails (rc=74) — always use each tree's own clang. Tier-C run: DECLINED, no gfx1031 device on this machine. This session changed host-only code (loader, test CMake), so no device behaviour changed on either arch.
+
+**Measurements**
+
+| quantity | value | provenance |
+|---|---|---|
+| decoder validation, 20 types | 20/20 PASS bit-exact, exit 0 | MEASURED, `tools/dequant_validate.py` |
+| Q3_K triple agreement | 8/8 cases engine==ggml-C==gguf-py | MEASURED |
+| ctest host suite | 6 pass / 1 skipped-by-design, exit 0 | MEASURED |
+| attn_c16.hip gfx1031 `-S` emit | rc=0 | MEASURED, `tmp/attn_c16_gfx1031.s` (scratch) |
+
+**Still open**   ROCMFPX/`ROCMFP4` ids (if real GGUF types — not in ggml 0.19.0's `GGMLQuantizationType`; confirm before building anything). gfx1031 tier-C execution unblocked by: hardware. Linked writeup unblocked by: a web-fetch tool, absent here — not summarised from memory. Next kernel lever, ranked: packed-`v_pk_fma_f16` score dot (needs tolerance headroom proof) or QT=32 (needs VGPR census first).
+
+### Phase 56 — ROCmFP family decoders: six fork-experimental types, 36/36 bit-exact vs the fork itself  ·  DONE
+
+*(Number corrected: first written as "Phase 51", which already exists at line 1088. This entry is unchanged otherwise.)*
+
+**Believed at the time**   "ROCMFPX ids — confirm they are real before building anything" (Phase 50 still-open). The user supplied the answer as two links: the fork repo and PR #42.
+
+**Decision**   The user chose "implement all six now" over record-and-defer. Implemented as transcriptions of the fork's scalar references (the Phase-50 pattern), validated against the fork's OWN unmodified sources compiled in — gguf-py has no codecs for these types, so the fork is the only oracle. No check was weakened; the one probe change (id bound 64 -> 256) is required by the new ids, not a relaxation.
+
+**Changed**
+- `src/loader/gguf.h` — `Q4_0_ROCMFP4=100, Q4_0_ROCMFP4_FAST=101, Q6_0_ROCMFPX=102, Q8_0_ROCMFPX=103, Q3_0_ROCMFPX=104, Q2_0_ROCMFPX=107` (fork's ids, `ggml/include/ggml.h:432-439`).
+- `src/loader/gguf.cpp` — names, block weights (32 all), block bytes (18/17/26/33/14/10), `is_dequantizable` true for all six.
+- `src/loader/dequant.cpp` — `knj_rocmfp4_scale_ue4m3_half[127]` + `knj_rocmfpx_scale_ue4m3[127]` as bit-exact hexfloat dumps of the fork's compiled tables (dumped, not re-derived); `dequant_q4_0_rocmfp4[_fast]`, `dequant_q2_0_rocmfpx` (frozen {-4,-1,1,4} book, cf. PR #42), `dequant_q3_0_rocmfpx` (+unpack8, mag {0,1,2,4} + sign bit), `dequant_q6_0_rocmfpx` (+unpack4, -0 decodes as -32), `dequant_q8_0_rocmfpx` (int8 codes, single scale); dispatch cases. Asymmetric edge transcribed, not "fixed": fp6 code 32 -> -32 while code 0 -> 0.
+- `tools/dequant_bytes_probe.cpp` — parse_type id bound 64 -> 256 (new ids live at 100+; without this the probe refuses them).
+- `tools/rocmfp_validate.py` (new) — 6 types x (zeros, ones, 0x7C..0x82 scale-sweep over the 0x7E validity edge, 3 seeded-random) x 4 blocks, engine vs fork-C, bit-exact.
+- Scratch only: `tmp/ROCmFPX` (depth-1 clone), `tmp/attnrep/rocmfp_ref.{c,exe}` (links fork's `rocmfp4.c`+`rocmfpx.c` unmodified; two stub symbols for quantize-path-only refs), `tmp/attnrep/dump_tables.c`, `tmp/rocmfp{x,4}_table.inc`, `tmp/rocmfp_bodies.inc`, `tmp/rocmfpx_pr42.diff`.
+
+**Verified**
+- `$ python3 tools/rocmfp_validate.py` → exit 0, `AGREE`, **36/36 PASS exact=128/128** (first run, no transcription fixes needed).
+- `$ python3 tools/dequant_validate.py` → exit 0, `AGREE`, 20/20 still bit-exact (no regression).
+- `cmake --build build/cmake-host` → exit 0; `ctest` full suite → exit 0 (6 pass, fuzz Skipped by design).
+- PR #42 read from the API + full diff: merged 2026-07-29, Vulkan-shaders-only, freezes FP2 codebook + GGUF layout. No Kanjoos device code affected (host loader only).
+
+**Measurements**
+
+| quantity | value | provenance |
+|---|---|---|
+| ROCmFP validation, 6 types x 6 cases | 36/36 PASS bit-exact vs fork-C, exit 0 | MEASURED, `tools/rocmfp_validate.py` |
+| decoder regression, 20 upstream types | 20/20 PASS, exit 0 | MEASURED, `tools/dequant_validate.py` |
+| ctest host suite | exit 0 post-change | MEASURED |
+
+**Still open**   c21_profiler GATE 1 (`beta.idle_ns >= 2ms` over a 3 ms sleep) flakes ~1/6 runs (observed 1.45 ms once). PRE-EXISTING, not this session: `tests/` + `src/profiler/` are byte-identical to HEAD (only the Phase-50 CMake PATH line touches `tests/`), the failing assertion measures wall-clock sleep, and the decoder code is not linked into that path. Deliberately NOT "fixed" by touching the threshold — that would be weakening a check to bury a flake. Unblocked by: a timing-robust gate (e.g. longer sleep / repeated sampling), a separate change with its own stated reason. gfx1031 tier-C still needs hardware. ROCmFPX upstream divergence risk stands: these ids are fork-only; if upstream ever assigns 100+ differently, the names here must be revisited.
+
+### Phase 57 — c21 GATE 1 flake fixed at the stimulus; fork-id collision protocol pinned  ·  DONE
+
+**Believed at the time**   GATE 1 (`beta.idle_ns >= 2 ms` over a 3 ms sleep) flaked ~1/6 with idle=1.45 ms. Phase 56 recorded it as pre-existing wall-clock flake and left it alone.
+
+**Decision**   The user ordered the fix. Diagnosed with an instrumented replica (tmp/gate1_probe.cpp: identical profiler sequence + independent QPC around the sleep, 30 runs): qpc_gap == idle_ns to the microsecond every run — the profiler measures exactly; the OS wait returned after ~1.45 ms of a 3 ms request. So the cause is the stimulus, not the measurement and not the 2 ms threshold. Fixed the stimulus (guaranteed-minimum sleep: sleep_for + yield-spin to 3 ms on a monotonic clock); the assertion is byte-identical. Separately, pinned the fork-id provenance (repo @ fb08d7c 2026-09-23) and a COLLISION PROTOCOL in gguf.h, since no runtime guard is possible without an upstream registry.
+
+**Changed**
+- `tests/unit/test_c21_profiler.cpp` — GATE 1 sleep is now guaranteed-minimum; 2 ms CHECK untouched.
+- `src/loader/gguf.h` — ROCmFP comment gains provenance + COLLISION PROTOCOL (grep Q4_0_ROCMFP4 if upstream reassigns 100..107).
+- `tools/rocmfp_validate.py` — docstring gains provenance + pointer to the protocol.
+
+**Verified**
+- `ctest -R c21_profiler` x30 → 30/30 PASS (was ~1/6 FAIL).
+- `tools/rocmfp_validate.py` → exit 0, AGREE 36/36; full `ctest` → exit 0 (6 pass, fuzz Skipped).
+
+**Measurements**
+
+| quantity | value | provenance |
+|---|---|---|
+| gate-1 replica, qpc_gap vs idle_ns | equal all 30 runs (3.4–27.5 ms range) | MEASURED, tmp/gate1_probe.exe |
+| c21_profiler after fix | 30/30 PASS | MEASURED |
+| full ctest + rocmfp battery | exit 0 / exit 0 | MEASURED |
+
+**Still open**   gfx1031 tier-C needs hardware. Upstream-divergence risk on ids 100+ now has a protocol instead of just a worry.

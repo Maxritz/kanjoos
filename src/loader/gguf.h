@@ -37,10 +37,12 @@ enum class GgmlType : uint32_t {
   Q5_K = 13,
   Q6_K = 14,
   Q8_K = 15,
-  // The IQ family. Nothing here decodes them; they are named so a container
-  // carrying them can be OPENED and refused per tensor, with the type spelled
-  // out, instead of dying at load with "unknown ggml type has no block bytes"
-  // and hiding the rest of the tensor table. IDs and block geometry are ggml's.
+  // Every type here is named so a container carrying it can be OPENED with the
+  // type spelled out instead of dying at load with "unknown ggml type" and
+  // hiding the rest of the tensor table. IDs and block geometry are ggml's.
+  // Decode coverage lives in dequant.cpp; ggml_type_is_dequantizable says
+  // which types it handles. A named-but-undecodable type is refused per
+  // tensor, never silently skipped.
   IQ2_XXS = 16,
   IQ2_XS = 17,
   IQ3_XXS = 18,
@@ -56,7 +58,28 @@ enum class GgmlType : uint32_t {
   F64 = 28,
   IQ1_M = 29,
   BF16 = 30,
+  TQ1_0 = 34,
+  TQ2_0 = 35,
   MXFP4 = 39,
+  NVFP4 = 40,
+  Q1_0 = 41,
+  // The ROCmFP family. Fork-experimental llama.cpp/ROCmFPX types (ids 100+),
+  // not upstream ggml. Geometry from ggml/rocmfp4/rocmfp4.h +
+  // ggml/rocmfpx/rocmfpx.h (static_asserted block sizes); decoders live in
+  // dequant.cpp, validated against the fork's own scalar references.
+  // Provenance: https://github.com/charlie12345/ROCmFPX @ fb08d7c
+  // (2026-09-23), incl. PR #42 which freezes the FP2 codebook and layouts.
+  // COLLISION PROTOCOL: these ids are fork-only. If upstream ggml ever
+  // assigns 100..107 to other types, these entries (names, geometry AND
+  // decoders) must move -- grep Q4_0_ROCMFP4. A foreign file carrying id 100
+  // would otherwise decode as ROCmFP4 silently. There is no runtime guard
+  // possible without an upstream registry; this comment is the guard.
+  Q4_0_ROCMFP4 = 100,
+  Q4_0_ROCMFP4_FAST = 101,
+  Q6_0_ROCMFPX = 102,
+  Q8_0_ROCMFPX = 103,
+  Q3_0_ROCMFPX = 104,
+  Q2_0_ROCMFPX = 107,
   Unknown = 0xFFFFFFFFu,
 };
 

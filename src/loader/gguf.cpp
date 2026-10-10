@@ -89,11 +89,21 @@ MetaValue read_value(Cursor& c, MetaType t) {
   if (t == MetaType::ARRAY) {
     v.elem_type = static_cast<MetaType>(c.pod<uint32_t>());
     uint64_t n = c.pod<uint64_t>();
-    if (v.elem_type == MetaType::ARRAY) fail("nested arrays are not valid GGUF");
+if (v.elem_type == MetaType::ARRAY) fail("nested arrays are not valid GGUF");
     // A declared count larger than the remaining bytes cannot be honest. The
     // check is cheap and turns a 2^63 element array into an error rather than
     // an allocation attempt.
-    v.arr.reserve(static_cast<size_t>(n < 1024 ? n : 1024));
+    //
+    // Reserve to the HONEST cap, not a fixed 1024: no element is smaller than
+    // its own size (8 bytes for a string's length prefix, the scalar width for
+    // the rest), so the file's remaining bytes bound the true count. A
+    // 152K-entry vocab is then one allocation instead of ~9 geometric copies
+    // of a 12 MB vector. A count past the cap is still refused exactly where it
+    // always was -- inside the loop, at the read that runs off the file.
+    const uint64_t per =
+        (v.elem_type == MetaType::STRING) ? 8 : meta_scalar_size(v.elem_type);
+    const uint64_t honest = (c.n - c.at) / per + 1;
+    v.arr.reserve(static_cast<size_t>(n < honest ? n : honest));
     for (uint64_t i = 0; i < n; ++i) {
       if (c.at >= c.n) fail("array of " + std::to_string(n) + " ran off the file");
       v.arr.push_back(read_value(c, v.elem_type));
@@ -149,12 +159,22 @@ const char* ggml_type_name(GgmlType t) {
     case GgmlType::IQ4_XS:  return "IQ4_XS";
     case GgmlType::IQ1_M:   return "IQ1_M";
     case GgmlType::MXFP4:   return "MXFP4";
+    case GgmlType::TQ1_0:   return "TQ1_0";
+    case GgmlType::TQ2_0:   return "TQ2_0";
+    case GgmlType::NVFP4:   return "NVFP4";
+    case GgmlType::Q1_0:    return "Q1_0";
     case GgmlType::I8:   return "I8";
     case GgmlType::I16:  return "I16";
     case GgmlType::I32:  return "I32";
     case GgmlType::I64:  return "I64";
     case GgmlType::F64:  return "F64";
     case GgmlType::BF16: return "BF16";
+    case GgmlType::Q4_0_ROCMFP4:      return "Q4_0_ROCMFP4";
+    case GgmlType::Q4_0_ROCMFP4_FAST: return "Q4_0_ROCMFP4_FAST";
+    case GgmlType::Q6_0_ROCMFPX:      return "Q6_0_ROCMFPX";
+    case GgmlType::Q8_0_ROCMFPX:      return "Q8_0_ROCMFPX";
+    case GgmlType::Q3_0_ROCMFPX:      return "Q3_0_ROCMFPX";
+    case GgmlType::Q2_0_ROCMFPX:      return "Q2_0_ROCMFPX";
     default:             return "UNKNOWN";
   }
 }
@@ -177,8 +197,17 @@ size_t ggml_type_block_weights(GgmlType t) {
     case GgmlType::Q8_0:
     case GgmlType::Q8_1: return 32;
     // IQ4_NL is the one IQ type with 32-weight blocks; MXFP4 is 32 too.
+    // The ROCmFP family is all 32-weight blocks (QK_ROCMFP4/QK_ROCMFPX = 32).
     case GgmlType::IQ4_NL:
-    case GgmlType::MXFP4: return 32;
+    case GgmlType::MXFP4:
+    case GgmlType::Q4_0_ROCMFP4:
+    case GgmlType::Q4_0_ROCMFP4_FAST:
+    case GgmlType::Q6_0_ROCMFPX:
+    case GgmlType::Q8_0_ROCMFPX:
+    case GgmlType::Q3_0_ROCMFPX:
+    case GgmlType::Q2_0_ROCMFPX: return 32;
+    case GgmlType::NVFP4: return 64;
+    case GgmlType::Q1_0:  return 128;
     // K-quants and the rest of the IQ family are 256-weight superblocks.
     case GgmlType::Q2_K:
     case GgmlType::Q3_K:
@@ -214,13 +243,24 @@ size_t ggml_type_block_bytes(GgmlType t) {
     case GgmlType::Q5_0: return 2 + 4 + 16;     // d, qh, 16 packed nibbles
     case GgmlType::Q5_1: return 2 + 2 + 4 + 16;
     case GgmlType::Q8_0: return 2 + 32;         // d + 32 int8
-    case GgmlType::Q8_1: return 4 + 4 + 32;     // d, s + 32 int8
     case GgmlType::Q2_K: return 2 + 2 + 16 + 64;
-    case GgmlType::Q3_K: return 2 + 1 + 64 + 12 + 2;
+    // Q3_K: hmask[32] + qs[64] + scales[12] + d. An older revision of this
+    // table said 81; the C struct (ggml-common.h block_q3_K + static_assert)
+    // and gguf-py's GGML_QUANT_SIZES agree on 110. Found 2026-10-10 while
+    // adding the Q3_K decoder; no decoder ever ran on the wrong size.
+    case GgmlType::Q3_K: return 32 + 64 + 12 + 2;
     case GgmlType::Q4_K: return 2 + 2 + 12 + 128;
     case GgmlType::Q5_K: return 2 + 2 + 12 + 32 + 128;
     case GgmlType::Q6_K: return 2 + 128 + 64 + 16;
-    case GgmlType::Q8_K: return 4 + 256 + 16;
+    // Q8_K: float d + qs[256] + bsums[16 * int16]. An older revision said
+    // 276 (16, not 32, trailing bytes); the C struct static_asserts
+    // sizeof(float) + 256 + 16*sizeof(int16_t) = 292. Same finding as Q3_K.
+    case GgmlType::Q8_K: return 4 + 256 + 32;
+    case GgmlType::Q8_1: return 2 + 2 + 32;
+    case GgmlType::TQ1_0: return 48 + 4 + 2;
+    case GgmlType::TQ2_0: return 64 + 2;
+    case GgmlType::NVFP4: return 4 + 32;
+    case GgmlType::Q1_0:  return 2 + 16;
     // The IQ family and MXFP4: sizes taken from gguf-py's GGML_QUANT_SIZES
     // (`python -c "from gguf.constants import GGML_QUANT_SIZES as Q; print(Q)"`),
     // not from memory. The engine has no decoder for any of them (see
@@ -236,6 +276,14 @@ size_t ggml_type_block_bytes(GgmlType t) {
     case GgmlType::IQ4_XS:  return 136;
     case GgmlType::IQ1_M:   return 56;
     case GgmlType::MXFP4:   return 17;
+    // ROCmFP block bytes: qs payload + UE4M3 scale bytes. 100: 16+2,
+    // 101: 16+1, 102: 24+2, 103: 32+1, 104: 12+2, 107: 8+2.
+    case GgmlType::Q4_0_ROCMFP4:      return 18;
+    case GgmlType::Q4_0_ROCMFP4_FAST: return 17;
+    case GgmlType::Q6_0_ROCMFPX:      return 26;
+    case GgmlType::Q8_0_ROCMFPX:      return 33;
+    case GgmlType::Q3_0_ROCMFPX:      return 14;
+    case GgmlType::Q2_0_ROCMFPX:      return 10;
     default:             fail("unknown ggml type has no block bytes");
   }
 }
@@ -246,10 +294,37 @@ bool ggml_type_is_dequantizable(GgmlType t) {
     case GgmlType::F16:
     case GgmlType::BF16:
     case GgmlType::Q4_0:
+    case GgmlType::Q4_1:
+    case GgmlType::Q5_0:
+    case GgmlType::Q5_1:
     case GgmlType::Q8_0:
+    case GgmlType::Q8_1:
+    case GgmlType::Q1_0:
+    case GgmlType::Q2_K:
+    case GgmlType::Q3_K:
     case GgmlType::Q4_K:
     case GgmlType::Q5_K:
     case GgmlType::Q6_K:
+    case GgmlType::Q8_K:
+    case GgmlType::IQ2_XXS:
+    case GgmlType::IQ2_XS:
+    case GgmlType::IQ3_XXS:
+    case GgmlType::IQ1_S:
+    case GgmlType::IQ4_NL:
+    case GgmlType::IQ3_S:
+    case GgmlType::IQ2_S:
+    case GgmlType::IQ4_XS:
+    case GgmlType::IQ1_M:
+    case GgmlType::TQ1_0:
+    case GgmlType::TQ2_0:
+    case GgmlType::MXFP4:
+    case GgmlType::NVFP4:
+    case GgmlType::Q4_0_ROCMFP4:
+    case GgmlType::Q4_0_ROCMFP4_FAST:
+    case GgmlType::Q6_0_ROCMFPX:
+    case GgmlType::Q8_0_ROCMFPX:
+    case GgmlType::Q3_0_ROCMFPX:
+    case GgmlType::Q2_0_ROCMFPX:
       return true;
     default:
       return false;

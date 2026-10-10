@@ -85,11 +85,16 @@ target_compile_features(test_c21_profiler PRIVATE cxx_std_17)
 #   python tools/make_tok_fixtures.py
 # and verify they are what the generator would write with:
 #   python tools/make_tok_fixtures.py --check
+# src/tokenizer/tokenizer.cpp carries KNJ_PROFILE_OP markers (the tokenizer
+# build is a measurable stage of the tokenize-only path), so the profiler's two
+# host-only translation units travel with it into these standalone targets.
 add_executable(test_tok_pre_dispatch
     test_tok_pre_dispatch.cpp
     ${CMAKE_SOURCE_DIR}/src/tokenizer/tokenizer.cpp
     ${CMAKE_SOURCE_DIR}/src/tokenizer/unicode_ranges.cpp
     ${CMAKE_SOURCE_DIR}/src/loader/gguf.cpp
+    ${CMAKE_SOURCE_DIR}/src/profiler/profiler.cpp
+    ${CMAKE_SOURCE_DIR}/src/platform/memprobe.cpp
 )
 
 target_include_directories(test_tok_pre_dispatch PRIVATE ${CMAKE_SOURCE_DIR})
@@ -116,6 +121,8 @@ add_executable(test_tok_whitespace_run
     ${CMAKE_SOURCE_DIR}/src/tokenizer/tokenizer.cpp
     ${CMAKE_SOURCE_DIR}/src/tokenizer/unicode_ranges.cpp
     ${CMAKE_SOURCE_DIR}/src/loader/gguf.cpp
+    ${CMAKE_SOURCE_DIR}/src/profiler/profiler.cpp
+    ${CMAKE_SOURCE_DIR}/src/platform/memprobe.cpp
 )
 
 target_include_directories(test_tok_whitespace_run PRIVATE ${CMAKE_SOURCE_DIR})
@@ -190,7 +197,10 @@ endif()
 # Windows PATH's `;` separators would break in the plain ENVIRONMENT property.
 get_filename_component(KNJ_CXX_BIN "${CMAKE_CXX_COMPILER}" DIRECTORY)
 if(WIN32 AND EXISTS "${KNJ_CXX_BIN}/libstdc++-6.dll")
+  # Every test, not just the C++ cases: the python gates also spawn MinGW-built
+  # helpers (engine, probes), which die with 0xC0000139 without this PATH entry.
   set_tests_properties(c21_profiler tok_pre_dispatch tok_whitespace_run
+                       tools_smoke tok_separator_sweep tok_pre_rules tok_fuzz_campaign
                        PROPERTIES ENVIRONMENT_MODIFICATION
                        "PATH=path_list_prepend:${KNJ_CXX_BIN}")
   message(STATUS "test PATH: prepending ${KNJ_CXX_BIN} (the MinGW runtime the "
