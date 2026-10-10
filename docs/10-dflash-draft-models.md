@@ -437,11 +437,18 @@ step is taken next starts from measurement.
 * Not that the token counts or dims are complete: the metadata above is what the
   files declare, and `dflash.selector_top_k = 16` in particular is read as a
   *declared* parameter whose use inside the selector is not established here.
-  Disposition 2026-10-11: recorded as **declared-not-yet-used**, and the loader
-  must not arithmetic on it: DFlash (the bootstrap member, 58 tensors, §3) carries
-  NO selector tensors at all, so a family loader reads `.selector_top_k` as
-  metadata for the members that do carry selector tensors (DFlash2, DSpark) and
-  its consumer is the drafter's token-selection path — C20 work, not loader work.
+  Disposition 2026-10-11, semantics VERIFIED 2026-10-11 from llama.cpp's
+  DFlash2 loader (`src/models/dflash.cpp`, PR #27342) and the Inco DFlash2
+  post: `selector_top_k` is the **draft-position candidate count** (the post's
+  "top 16"), required-positive whenever selector tensors are present; the
+  `selector_predecessor/successor` tables are `{rank, vocab}` codebooks (rank
+  256 here), not output heads; the DFlash2 forward scores predecessor→candidate
+  edges as drafter-logit + context-gated low-rank interaction. Inventory
+  arithmetic reconciled in source: 58 (5×11 backbone + fc/enc.norm/out.norm)
+  + 4 (DSpark Markov/confidence heads) = 62; 58 + 5×4 conv + 3 selector = 81.
+  The loader still reads it as metadata (DFlash bootstrap, §3, carries NO
+  selector tensors, so no loader arithmetic may assume it); its consumer is
+  the C20 drafter's token-selection path — C20 work, not loader work.
 * Not that the three variants are interchangeable: they differ in block size (8 /
   16 / 7), target-layer sets, FFN width, head counts, rope scaling and extra heads.
   A loader that treats `dflash` as one shape will be wrong for two of the three.

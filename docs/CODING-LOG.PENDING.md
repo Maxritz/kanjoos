@@ -1888,3 +1888,44 @@ five `dequant_blocks` branches. Scratch: `tmp/gen_iq2_iq3xxs_q2k_patch.py`
 profiling rows) and the C20 DFlash/DFlash2/DSpark loader — unchanged. The
 3-series campaign re-run is still in flight on MACX (267009).
 
+
+### Phase 65 — seed-1 verdict lands (fixed harness proven live); DFlash2 selector semantics verified; trunk spec captured  ·  DONE
+
+**Believed at the time**   The 3-series re-run was in flight (267009); the
+DFlash2 selector meaning rested on the Inco post's prose; the trunk task had
+no captured input spec.
+**Decision**   Read the seed logs (ground truth, not task state), land the
+two research passes into the docs they unblock, and record the trunk input
+spec instead of starting the trunk.
+**Changed**   `docs/10-dflash-draft-models.md` §8 — selector_top_k disposition
+upgraded from declared-not-used to verified semantics (llama.cpp
+`src/models/dflash.cpp`, PR #27342, Inco post): candidate count per position,
+required-positive with selector tensors; predecessor/successor are
+`{rank, vocab}` codebooks; 58/62/81 reconciled by inventory arithmetic.
+No code changed.
+**Verified**
+- MACX `seed1-5000.log` tail: `5031/5032 identical, 1 policy, 0 boundary,
+  VERDICT: PASS`, `rc=0` — first true series green.
+- MACX `seed2-5000.log` header: `fuzz_seed=2 per_seed=5000`, crosscheck sha
+  `34b7cc5e107a...` == the synced fixed file. The per-seed derivation
+  (Phase 62's fix) is proven in production, not just in the local e2e smoke.
+  Seed 2 running; seed 3 queued behind it in the same task.
+- Trunk input spec captured from llama.cpp master `src/models/qwen35.cpp`
+  (researcher-read): trunk = pre-attn RMSNorm → recurrent GDN *or* gated
+  full-attn → residual add → `post_attention_norm` → parallel SiLU FFN
+  (up/gate/down, no inner residual) → residual add; full-attn iff
+  `(i+1) % full_attention_interval == 0` (default 4) unless
+  `qwen35.attention.recurrent_layers` mask present; head = `output_norm` +
+  `output.weight [n_embd, n_vocab]` (falls back to tied `token_embd`);
+  MTP block is post-trunk (eh_proj/enorm/hnorm + optional embed/shared-head).
+  This is the composition `trunk_forward()` must reproduce; the oracle side
+  already has per-layer probes to compare against.
+**Measurements**           | quantity | value | provenance |
+|---|---|---|---|
+| seed 1 (fuzz_seed=1), fixed harness | 5031/5032, 0 boundary, rc=0 | MEASURED, MACX log tail |
+| seed 2 header | fuzz_seed=2, sha matches synced file | MEASURED |
+**Still open**   seeds 2–3 verdicts (same task, hours out); trunk_forward +
+sampler implementation against the captured spec; C20 loader against the
+verified inventory (58/62/81 + required-key table now in docs/10 §8's
+provenance chain).
+
