@@ -1527,3 +1527,62 @@ ordered the remaining workstreams committed/pushed plus a full README.
 - `git log origin/main` carries ccbdfd7; this commit is its follow-up.
 
 **Still open**   gfx1031 tier-C needs hardware. Fork-id protocol stands.
+
+### Phase 59 — gfx1031 tier-B/C + host suite on MACX (RX 6700 XT) · DONE
+
+**Believed at the time**   gfx1031 tier-C "needs hardware" (Phase 58 still-open);
+no checkout or toolchain verified off the primary card.
+**Decision**   Test over `ssh rr@10.0.0.11` (MACX): clone @ ecbe5d2 to
+`D:\kanjoos`, drive the bench with a MACX-side script instead of editing
+`run_bench.sh` (it hardcodes `/g/ROCM10RT-*`, absent on MACX), because a
+machine-port is scratch while the runner is contract. Chose / rejected /
+falsified by: `D:\Rocm10` therock tree is the toolchain (`HIP_PATH`,
+`ROCM_SDK_TARGET_FAMILY=gfx1031`); its clang needs
+`--rocm-device-lib-path=<root>/lib/llvm/amdgcn/bitcode` for the link step
+(`--rocm-path` at the root is NOT enough — measured, exit 1 without it).
+**Changed**   `docs/CODING-LOG.PENDING.md` — this entry only. Scratch (not
+committed): `tmp/macx_gfx1031_bench.sh` (+ `D:\knj-scratch\mbench.sh` copy),
+`tmp/gfx1031_devquery.cpp`, `tmp/fuzz_full.cmd`.
+**Verified**
+- `$ D:\Rocm10\bin\hipInfo.exe` → `gcnArchName: gfx1031`, RX 6700 XT, 20 CU,
+  wave32, 2424 MHz; own probe (`devquery.exe`, hipcc + device-lib-path):
+  `count=1 ... gcnArchName=gfx1031`.
+- Tier B census (device-only `-S`, 16 drivers): COMPILE = attn_c16, expert_gemm,
+  gemm_tiled, gemm_w4 (both `KNJ_EXPECT` PRESENT — `v_dot4_i32_i8`,
+  `v_dot8_i32_i4`, the RDNA2 compute basis), trace_components; CORRECT REFUSALS
+  = gemm_wmma + wmma_* (`_gfx12` builtin needs target feature), all rocWMMA +
+  q4k_* (`static assertion failed: Unsupported architecture`); EMPTY =
+  knj_xfer_probe (host-driven, no kernel). Exit 0, no EXPECT miss.
+- Tier C (`KNJ_BUILD_ARCH=gfx1031`): attn_c16 PASS (prefill/decode vs oracle,
+  relRMSE ~1-2e-4; prefill 8925 us, decode 220.9 us), expert_gemm PASS (24576
+  outputs vs double oracle, relRMSE 1.008e-3; best split-K 64: 74.8 us,
+  1.35 TFLOP/s; H2D one-expert 16.5 GB/s), gemm_tiled PASS (M=1024: 4.06
+  TFLOP/s, 16.4% of 24.8 derived peak), knj_xfer_probe PASS (H2D 12-12.8 GB/s;
+  read-only NOT RUN, no file arg — honest), trace_components PASS (0
+  mismatches). 9 WMMA/rocWMMA drivers SKIPPED with the measured refusal reason
+  (no WMMA on RDNA2 — correct refusal, not a result). Gate exit 0.
+- Host `ctest` on MACX (Strawberry g++ 13.2, Python 3.14 + `gguf`, env
+  `KNJ_ENGINE/KNJ_LLAMA_TOKENIZE/KNJ_TOK_MODEL=D:\x\Qwen3-30B-A3B-...Q2_K`):
+  c21_profiler, tok_pre_dispatch, tok_whitespace_run, tools_smoke (74.8 s),
+  tok_separator_sweep, tok_pre_rules — 6/6 PASS. tok_pre_rules needed
+  `KNJ_LLAMA_CPP=D:\knj-scratch\llamaref` (junctions `src→…\src`,
+  `build→…\build-hip`; same bytes, nothing touched in the user's tree):
+  VERDICT PASS, oracle `llama.dll` carries both regex strings. (Drive-by
+  finding: `set V=X &` in cmd bakes a trailing space into V; `set "V=X"`
+  is mandatory.)
+- Fuzz signal `--seeds 1 --per-seed 60`: 60 prompts, 91 identical, 0 boundary,
+  VERDICT PASS. Full campaign (seeds 1-3 × 5000) launched detached via
+  `schtasks KnjFuzzFull` (ssh children die on disconnect — measured; scheduler
+  survives, PID 7800/3864, `Last Result 267009` = running); progress in
+  `D:\knj-scratch\fuzz_full.log`, records append to `D:\kanjoos\records\`.
+**Measurements**           | quantity | value | provenance |
+|---|---|---|---|
+| gfx1031 H2D one-expert (2.47 MB) | 16.5 GB/s | MEASURED (expert_gemm, MACX) |
+| gfx1031 VRAM streaming roofline | ~314-327 GB/s | MEASURED (3 drivers agree) |
+| gfx1031 packed-f16 derived peak | 24.8 TFLOP/s | DERIVED (20 CU × 2424 MHz) |
+| attn_c16 gfx1031 decode step | 220.9 us, 76 GB/s (23% roof) | MEASURED |
+| gemm_tiled gfx1031 M=1024 | 4.06 TFLOP/s, 16.4% peak | MEASURED |
+**Still open**   Full 15k fuzz verdict pending (task running); gfx1031
+`baselines.txt` pins not yet cut (first measured numbers above are the inputs);
+`run_bench.sh` still hardcodes `/g/…` paths (MACX script stays scratch until a
+path-configurable runner is designed); TowardsDataScience URL never provided.
